@@ -580,10 +580,12 @@ export async function stitchBugToPDF(
     newPage.setCropBox(0, 0, newWidth, newHeight);
     newPage.setBleedBox(0, 0, newWidth, newHeight);
     
-    // Position the TrimBox precisely, accounting for the bleed offset
-    const newTrimX = trimCropEnabled ? (bleedAmount - manualCropAmount) : (bleedAmount + (trimBox.x - cropBox.x) - manualCropAmount);
-    const newTrimY = trimCropEnabled ? (bleedAmount - manualCropAmount) : (bleedAmount + (trimBox.y - cropBox.y) - manualCropAmount);
-    newPage.setTrimBox(newTrimX, newTrimY, trimBox.width, trimBox.height);
+    // Position the TrimBox precisely.
+    // The TrimBox in the NEW page is always located at the bleed offset 
+    // because the processed artwork is centered on the expanded page.
+    const newTrimX = bleedAmount;
+    const newTrimY = bleedAmount;
+    newPage.setTrimBox(newTrimX, newTrimY, origWidth, origHeight);
 
     // Overlay the vector Union Bug if enabled and targeted for this page
     if (bugEnabled && embeddedBugPageForOutput && pagesToStitch.includes(pageNum)) {
