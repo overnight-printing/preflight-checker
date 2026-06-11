@@ -12,6 +12,7 @@ export default function EditorCanvas({
   canvasScale = 1.0,
   showSafeLine = true,
   bleedEnabled = false, // Added bleedEnabled to draw the actual Trim Line (Magenta)
+  trimCropEnabled = false, // New prop to align guide lines when cropped
   bugEnabled = true, // Toggle to show/hide bug overlay
   zoom = 1.0,       // Zoom scale (0.1 to 3.0)
   onZoomChange,     // callback to update zoom
@@ -38,8 +39,13 @@ export default function EditorCanvas({
   const virtualBleedOffset = bleedEnabled ? 9.0 : 0.0;
   
   // CropBox coordinates mapping (offsetting for virtual bleed if active)
-  const trimBoxLeft = hasBoxInfo ? ((pdfBoxInfo.trimBox.x - pdfBoxInfo.cropBox.x) + virtualBleedOffset) : 0;
-  const trimBoxTop = hasBoxInfo ? ((pdfBoxInfo.cropBox.height - (pdfBoxInfo.trimBox.y - pdfBoxInfo.cropBox.y + pdfBoxInfo.trimBox.height)) + virtualBleedOffset) : 0;
+  // If trimCropEnabled is true, the canvas origin (0,0) is effectively the TrimBox's top-left.
+  const trimBoxLeft = hasBoxInfo 
+    ? (trimCropEnabled ? virtualBleedOffset : (pdfBoxInfo.trimBox.x - pdfBoxInfo.cropBox.x) + virtualBleedOffset) 
+    : 0;
+  const trimBoxTop = hasBoxInfo 
+    ? (trimCropEnabled ? virtualBleedOffset : (pdfBoxInfo.cropBox.height - (pdfBoxInfo.trimBox.y - pdfBoxInfo.cropBox.y + pdfBoxInfo.trimBox.height)) + virtualBleedOffset) 
+    : 0;
   const trimBoxWidth = hasBoxInfo ? pdfBoxInfo.trimBox.width : 0;
   const trimBoxHeight = hasBoxInfo ? pdfBoxInfo.trimBox.height : 0;
 

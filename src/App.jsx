@@ -942,6 +942,7 @@ export default function App() {
                 sourceHasBleed={sourceHasBleed}
                 showSafeLine={showSafeLine}
                 bleedEnabled={bleedEnabled} // Draw actual Magenta Trim Line
+                trimCropEnabled={trimCropEnabled} // New prop for non-destructive guide lines
                 bugEnabled={bugEnabled}
                 zoom={zoom}
                 onZoomChange={setZoom}
