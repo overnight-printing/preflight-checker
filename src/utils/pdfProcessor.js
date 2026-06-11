@@ -259,8 +259,8 @@ export async function renderPDFPageToCanvas(page, canvas, scale = 1.5, bleedAmou
     targetCtx.fillStyle = '#ffffff';
     targetCtx.fillRect(0, 0, targetW, targetH);
 
-    if (trimCropEnabled && pdfBoxInfo) {
-      // Use a temporary canvas to render the full page, then draw the cropped portion
+    // If any cropping is active (automatic trim box or manual inset), we must use a temporary full-page render
+    if ((trimCropEnabled && pdfBoxInfo) || manualCropAmount > 0) {
       const fullCanvas = document.createElement('canvas');
       fullCanvas.width = Math.round(viewport.width);
       fullCanvas.height = Math.round(viewport.height);
@@ -273,11 +273,11 @@ export async function renderPDFPageToCanvas(page, canvas, scale = 1.5, bleedAmou
 
       targetCtx.drawImage(
         fullCanvas,
-        Math.round(offsetX), Math.round(offsetY), Math.round(originalWidth), Math.round(originalHeight), // Source (TrimBox in full page)
-        0, 0, Math.round(originalWidth), Math.round(originalHeight) // Destination (at origin of target)
+        Math.round(offsetX), Math.round(offsetY), Math.round(originalWidth), Math.round(originalHeight), // Source portion
+        0, 0, Math.round(originalWidth), Math.round(originalHeight) // Destination
       );
     } else {
-      // Direct render
+      // Direct render for the full page
       await page.render({
         canvasContext: targetCtx,
         viewport
