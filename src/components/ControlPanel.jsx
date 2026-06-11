@@ -21,7 +21,8 @@ export default function ControlPanel({
   onScaleChange,
   onShowSafeLineToggle,
   onMultiPageOptionsChange,
-  onForceTrimCrop
+  onForceTrimCrop,
+  onReset
 }) {
 
   const getBugInchDimensions = () => {
@@ -43,7 +44,17 @@ export default function ControlPanel({
     <div className="sidebar-content">
       {/* 0. Toggle Bug Stamping Activity */}
       <div className="sidebar-section">
-        <span className="section-title">스탬프 활성화</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <span className="section-title" style={{ marginBottom: 0 }}>스탬프 활성화</span>
+          <button 
+            className="btn btn-secondary" 
+            style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', borderStyle: 'dashed' }}
+            onClick={onReset}
+            title="모든 프리플라이트 수정 및 크롭을 취소하고 원본 파일로 되돌립니다."
+          >
+            🔄 아트워크 초기화
+          </button>
+        </div>
         <div className="toggle-item" style={{ borderLeft: bugEnabled ? '3px solid var(--primary)' : '1px solid var(--border-color)' }}>
           <div className="toggle-info">
             <h5 style={{ color: bugEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>유니언버그 인쇄 적용</h5>

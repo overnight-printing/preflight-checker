@@ -52,6 +52,7 @@ const loadImageElement = (file) => {
 export default function App() {
   // File states
   const [artworkFile, setArtworkFile] = useState(null);
+  const [originalFile, setOriginalFile] = useState(null); // Keep a backup of the original upload
   const [bugFile, setBugFile] = useState(null);
   const [artworkType, setArtworkType] = useState('pdf'); // 'pdf' | 'image'
   
@@ -191,6 +192,7 @@ export default function App() {
   const handleArtworkSelect = useCallback(async (file) => {
     setIsLoading(true);
     setArtworkFile(file);
+    setOriginalFile(file); // Store initial upload as backup
     setCurrentAlignment('right'); // Reset to default right alignment on new artwork
     setHasDoneInitialAlignment(false); // Reset initial alignment flag to trigger bottom placement on canvas load
     setOriginalImage(null);
@@ -294,6 +296,7 @@ export default function App() {
   // Clears the artwork state
   const handleClearArtwork = () => {
     setArtworkFile(null);
+    setOriginalFile(null);
     setArtworkCanvas(null);
     setPdfDoc(null);
     setPdfBoxInfo(null);
@@ -303,6 +306,44 @@ export default function App() {
     setPageSizes({});
     setPageAlignments({});
     setHasDoneInitialAlignment(false);
+  };
+
+  // Resets the current artwork back to the original uploaded file (undo all preflight fixes/crops)
+  const handleResetArtwork = async () => {
+    if (!originalFile) return;
+    
+    setIsLoading(true);
+    try {
+      setArtworkFile(originalFile);
+      
+      const extension = originalFile.name.split('.').pop().toLowerCase();
+      
+      if (extension === 'pdf') {
+        setArtworkType('pdf');
+        const doc = await loadPDF(originalFile);
+        setPdfDoc(doc);
+        setTotalPages(doc.numPages);
+        setCurrentPage(1);
+      } else {
+        setArtworkType('image');
+        setPdfDoc(null);
+        setTotalPages(1);
+        setCurrentPage(1);
+        const img = await loadImageElement(originalFile);
+        setOriginalImage(img);
+      }
+      
+      // Reset common states
+      setBleedEnabled(false);
+      setSourceHasBleed(extension === 'pdf');
+      
+      alert('아트워크가 최초 업로드 상태로 초기화되었습니다.');
+    } catch (error) {
+      console.error('Error resetting artwork:', error);
+      alert('초기화 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Clears the union bug state
@@ -1044,6 +1085,7 @@ export default function App() {
                   onShowSafeLineToggle={() => setShowSafeLine(!showSafeLine)}
                   onMultiPageOptionsChange={setMultiPageOptions}
                   onForceTrimCrop={handleForceTrimCrop}
+                  onReset={handleResetArtwork}
                   isExporting={isExporting}
                 />
               ) : (
@@ -1051,6 +1093,7 @@ export default function App() {
                   results={preflightResults}
                   isScanning={isScanning}
                   onFix={handlePreflightFix}
+                  onReset={handleResetArtwork}
                   artworkType={artworkType}
                   isExporting={isLoading || isScanning || isExporting}
                 />

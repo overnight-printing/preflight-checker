@@ -11,6 +11,7 @@ export default function PreflightPanel({
   results,
   isScanning,
   onFix,
+  onReset,
   artworkType
 }) {
 
@@ -87,7 +88,18 @@ export default function PreflightPanel({
   return (
     <div className="sidebar-content" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       
-
+      {/* 1. Preflight Title & Reset */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span className="section-title" style={{ marginBottom: 0 }}>인쇄 적합성 검사 요약</span>
+        <button 
+          className="btn btn-secondary" 
+          style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', borderStyle: 'dashed' }}
+          onClick={onReset}
+          title="모든 프리플라이트 수정 및 크롭을 취소하고 원본 파일로 되돌립니다."
+        >
+          🔄 아트워크 초기화
+        </button>
+      </div>
 
       {/* 2. Scanning Summary Stats */}
       <div style={{
