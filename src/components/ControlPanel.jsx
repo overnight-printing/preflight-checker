@@ -234,9 +234,9 @@ export default function ControlPanel({
             className="btn btn-secondary"
             style={{ width: '100%', fontSize: '12px', padding: '8px', borderStyle: 'dashed' }}
             onClick={onForceTrimCrop}
-            title="파일에 크랍마크가 포함된 경우, 실제 인쇄 영역(TrimBox)만 남기고 잘라냅니다."
+            title="파일에 크랍마크가 포함된 경우, 실제 인쇄 영역만 남기고 잘라냅니다."
           >
-            ✂️ 재단선(TrimBox) 기준으로 자르기
+            ✂️ 재단선 기준으로 자르기
           </button>
           <p style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: '1.4' }}>
             * 크랍마크는 있지만 블리드가 없는 파일에서 사용하세요. 자른 후 미러 블리드가 자동 적용됩니다.
