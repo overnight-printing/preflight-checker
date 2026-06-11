@@ -102,6 +102,7 @@ export default function App() {
   // Bleed settings
   const [bleedEnabled, setBleedEnabled] = useState(false);
   const [trimCropEnabled, setTrimCropEnabled] = useState(false); // New non-destructive crop toggle
+  const [manualCropAmount, setManualCropAmount] = useState(0); // Manual inset in points (72pt = 1 inch)
   const [sourceHasBleed, setSourceHasBleed] = useState(true); // Default true for PDFs (0.125" / 9pt bleed included)
   const [originalImage, setOriginalImage] = useState(null); // Keeps the original Image element for reactive image bleed redraws
 
@@ -335,6 +336,8 @@ export default function App() {
       
       // Reset common states
       setBleedEnabled(false);
+      setTrimCropEnabled(false);
+      setManualCropAmount(0);
       setSourceHasBleed(extension === 'pdf');
     } catch (error) {
       console.error('Error resetting artwork:', error);
@@ -359,13 +362,13 @@ export default function App() {
 
 
   // Render a specific PDF page to canvas (called reactively)
-  const renderPage = async (doc, pageNum, bleedAmount = 0, trimCrop = false, boxInfo = null) => {
+  const renderPage = async (doc, pageNum, bleedAmount = 0, trimCrop = false, boxInfo = null, manualCrop = 0) => {
     try {
       const page = await doc.getPage(pageNum);
       const canvas = document.createElement('canvas');
       
-      // Render to canvas with bleed parameters (0.125" = 9.0pt) and optional trim crop
-      await renderPDFPageToCanvas(page, canvas, canvasScale, bleedAmount, trimCrop, boxInfo);
+      // Render to canvas with bleed parameters (0.125" = 9.0pt) and optional trim/manual crop
+      await renderPDFPageToCanvas(page, canvas, canvasScale, bleedAmount, trimCrop, boxInfo, manualCrop);
       setArtworkCanvas(canvas);
 
       // Extract geometry metadata if we have the file
@@ -383,7 +386,7 @@ export default function App() {
   };
 
   // Helper to render an image artwork to canvas with or without mirror bleed (called reactively)
-  const renderImageCanvas = (img, bleed) => {
+  const renderImageCanvas = (img, bleed, manualCrop = 0) => {
     const canvas = document.createElement('canvas');
     const W = img.width;
     const H = img.height;
@@ -392,11 +395,32 @@ export default function App() {
     const bleedAmount = bleed ? 9.0 : 0;
     const bleedPx = bleedAmount * canvasScale;
     
-    if (bleedPx > 0) {
-      canvas.width = Math.round(W + (bleedPx * 2));
-      canvas.height = Math.round(H + (bleedPx * 2));
+    // Convert manualCrop (pt) to pixels
+    const manualCropPx = manualCrop * canvasScale;
+    const finalW = W - (manualCropPx * 2);
+    const finalH = H - (manualCropPx * 2);
+
+    if (bleedPx > 0 || manualCropPx > 0) {
+      canvas.width = Math.round(finalW + (bleedPx * 2));
+      canvas.height = Math.round(finalH + (bleedPx * 2));
       const ctx = canvas.getContext('2d');
-      drawMirrorBleed(ctx, img, W, H, bleedPx);
+      
+      if (manualCropPx > 0) {
+        // First crop the image onto a temporary canvas
+        const croppedTemp = document.createElement('canvas');
+        croppedTemp.width = Math.round(finalW);
+        croppedTemp.height = Math.round(finalH);
+        const ctCtx = croppedTemp.getContext('2d');
+        ctCtx.drawImage(img, Math.round(manualCropPx), Math.round(manualCropPx), Math.round(finalW), Math.round(finalH), 0, 0, Math.round(finalW), Math.round(finalH));
+        
+        if (bleedPx > 0) {
+          drawMirrorBleed(ctx, croppedTemp, finalW, finalH, bleedPx);
+        } else {
+          ctx.drawImage(croppedTemp, 0, 0);
+        }
+      } else {
+        drawMirrorBleed(ctx, img, W, H, bleedPx);
+      }
     } else {
       canvas.width = W;
       canvas.height = H;
@@ -411,7 +435,7 @@ export default function App() {
     setExtractedColors(colors);
   };
 
-  // Reactive Effect: Re-renders the artwork canvas when page, doc, bleed, image, or trimCrop changes
+  // Reactive Effect: Re-renders the artwork canvas when page, doc, bleed, image, trimCrop, or manualCrop changes
   useEffect(() => {
     if (!artworkFile) return;
     
@@ -421,9 +445,9 @@ export default function App() {
         const bleedAmount = bleedEnabled ? 9.0 : 0; // 0.125" = 9.0pt
         
         if (artworkType === 'pdf' && pdfDoc) {
-          await renderPage(pdfDoc, currentPage, bleedAmount, trimCropEnabled, pdfBoxInfo);
+          await renderPage(pdfDoc, currentPage, bleedAmount, trimCropEnabled, pdfBoxInfo, manualCropAmount);
         } else if (artworkType === 'image' && originalImage) {
-          renderImageCanvas(originalImage, bleedEnabled);
+          renderImageCanvas(originalImage, bleedEnabled, manualCropAmount);
         }
       } catch (error) {
         console.error('Error updating artwork render:', error);
@@ -434,7 +458,7 @@ export default function App() {
     
     updateArtworkRender();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bleedEnabled, trimCropEnabled, currentPage, originalImage, pdfDoc, pdfBoxInfo]);
+  }, [bleedEnabled, trimCropEnabled, manualCropAmount, currentPage, originalImage, pdfDoc, pdfBoxInfo]);
 
   // 2. Handle Union Bug File Upload
   const handleBugSelect = async (file) => {
@@ -791,7 +815,8 @@ export default function App() {
           bugEnabled,  // Pass toggle state
           finalPositions,
           finalSizes,
-          trimCropEnabled // Pass non-destructive toggle
+          trimCropEnabled, // Pass non-destructive toggle
+          manualCropAmount // Pass manual inset
         );
         
         // Trigger browser download
@@ -943,6 +968,7 @@ export default function App() {
                 showSafeLine={showSafeLine}
                 bleedEnabled={bleedEnabled} // Draw actual Magenta Trim Line
                 trimCropEnabled={trimCropEnabled} // New prop for non-destructive guide lines
+                manualCropAmount={manualCropAmount} // Pass manual inset for guide alignment
                 bugEnabled={bugEnabled}
                 zoom={zoom}
                 onZoomChange={setZoom}
@@ -1038,6 +1064,8 @@ export default function App() {
                   onBleedToggle={() => setBleedEnabled(!bleedEnabled)}
                   trimCropEnabled={trimCropEnabled}
                   onTrimCropToggle={() => setTrimCropEnabled(!trimCropEnabled)}
+                  manualCropAmount={manualCropAmount}
+                  onManualCropChange={setManualCropAmount}
                   bugEnabled={bugEnabled}
                   onBugEnabledToggle={() => setBugEnabled(!bugEnabled)}
                   onQuickAlign={handleQuickAlign}

@@ -23,6 +23,8 @@ export default function ControlPanel({
   onMultiPageOptionsChange,
   trimCropEnabled,
   onTrimCropToggle,
+  manualCropAmount,
+  onManualCropChange,
   onReset
 }) {
 
@@ -243,6 +245,70 @@ export default function ControlPanel({
             />
             <span className="slider-switch" />
           </label>
+        </div>
+
+        {/* Manual Margin Inset Controls */}
+        <div style={{ 
+          marginTop: '12px', 
+          padding: '12px', 
+          background: 'rgba(255,255,255,0.02)', 
+          borderRadius: '12px',
+          border: '1px solid var(--border-color)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)' }}>여백 추가 커트 (Manual)</span>
+            <span style={{ fontSize: '11px', color: 'var(--accent)', fontWeight: '700' }}>
+              {(manualCropAmount / 72).toFixed(3)}"
+            </span>
+          </div>
+          
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
+            <button 
+              className="btn btn-secondary" 
+              style={{ padding: '4px 10px' }}
+              onClick={() => onManualCropChange(Math.max(0, manualCropAmount - 0.72))} // -0.01"
+            >
+              -
+            </button>
+            <input
+              type="text"
+              style={{ 
+                flex: 1, 
+                background: 'var(--bg-input)', 
+                border: '1px solid var(--border-color)', 
+                borderRadius: '6px', 
+                padding: '4px', 
+                fontSize: '12px', 
+                textAlign: 'center',
+                color: 'var(--text-primary)'
+              }}
+              value={(manualCropAmount / 72).toFixed(3)}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val)) onManualCropChange(val * 72);
+              }}
+            />
+            <button 
+              className="btn btn-secondary" 
+              style={{ padding: '4px 10px' }}
+              onClick={() => onManualCropChange(manualCropAmount + 0.72)} // +0.01"
+            >
+              +
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {[0, 0.125, 0.25, 0.375, 0.5].map(inch => (
+              <button
+                key={inch}
+                className={`btn btn-secondary ${manualCropAmount === inch * 72 ? 'btn-primary' : ''}`}
+                style={{ flex: 1, padding: '4px 0', fontSize: '10px', minWidth: '45px' }}
+                onClick={() => onManualCropChange(inch * 72)}
+              >
+                {inch === 0 ? 'Reset' : `${inch}"`}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Safe Margin Guide Line Toggle */}

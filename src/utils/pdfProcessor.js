@@ -214,9 +214,10 @@ export function drawMirrorBleed(ctx, orig, W, H, B) {
  * @param {number} bleedAmount - Bleed amount in PDF points (default 0)
  * @param {boolean} trimCropEnabled - If true, crops the render to the TrimBox
  * @param {Object} pdfBoxInfo - Box dimensions for the page
+ * @param {number} manualCropAmount - Manual inset in PDF points
  * @returns {Promise<{width: number, height: number}>}
  */
-export async function renderPDFPageToCanvas(page, canvas, scale = 1.5, bleedAmount = 0, trimCropEnabled = false, pdfBoxInfo = null) {
+export async function renderPDFPageToCanvas(page, canvas, scale = 1.5, bleedAmount = 0, trimCropEnabled = false, pdfBoxInfo = null, manualCropAmount = 0) {
   const viewport = page.getViewport({ scale });
   
   let originalWidth = viewport.width;
@@ -233,6 +234,15 @@ export async function renderPDFPageToCanvas(page, canvas, scale = 1.5, bleedAmou
     // PDF coordinates are Y-up, canvas is Y-down. 
     // CropBox height - (TrimBox Y - CropBox Y + TrimBox height)
     offsetY = (cropBox.height - (trimBox.y - cropBox.y + trimBox.height)) * scale;
+  }
+
+  // Apply manual offset (inset) on top of existing crop
+  if (manualCropAmount > 0) {
+    const manualOffsetPx = manualCropAmount * scale;
+    originalWidth -= manualOffsetPx * 2;
+    originalHeight -= manualOffsetPx * 2;
+    offsetX += manualOffsetPx;
+    offsetY += manualOffsetPx;
   }
 
   const bleedPx = Math.round(bleedAmount * scale);
@@ -411,7 +421,8 @@ export async function stitchBugToPDF(
   bugEnabled = true,
   pagePositions = {},
   pageSizes = {},
-  trimCropEnabled = false
+  trimCropEnabled = false,
+  manualCropAmount = 0
 ) {
   const originalBytes = await originalPDFFile.arrayBuffer();
   const pdfDoc = await PDFDocument.load(originalBytes);
@@ -440,8 +451,9 @@ export async function stitchBugToPDF(
     }
   }
   
-  // Option A: Standard Vector Overlay (Bleed is Disabled)
-  if (bleedAmount === 0) {
+  // Option A: Standard Vector Overlay (Bleed is Disabled AND no manual crop)
+  // Note: if manualCrop is active, we MUST go through the rasterize-and-crop path (Option B)
+  if (bleedAmount === 0 && manualCropAmount === 0) {
     if (bugEnabled && embeddedBugPage) {
       for (const pageNum of pagesToStitch) {
         if (pageNum < 1 || pageNum > pages.length) continue;
@@ -480,7 +492,7 @@ export async function stitchBugToPDF(
     return await pdfDoc.save();
   }
   
-  // Option B: Expanded Print Output (0.125" Mirror Bleed Enabled)
+  // Option B: Expanded Print Output (Bleed OR Manual Crop Enabled)
   const outputDoc = await PDFDocument.create();
   const pdfjsDoc = await loadPDF(originalPDFFile);
   
@@ -501,8 +513,14 @@ export async function stitchBugToPDF(
     // If trimCropEnabled is true, we act as if the TrimBox IS the entire page area
     const activeBaseBox = trimCropEnabled ? trimBox : cropBox;
     
-    const origWidth = activeBaseBox.width;
-    const origHeight = activeBaseBox.height;
+    let origWidth = activeBaseBox.width;
+    let origHeight = activeBaseBox.height;
+
+    // Apply manual crop offset (inset)
+    if (manualCropAmount > 0) {
+      origWidth -= manualCropAmount * 2;
+      origHeight -= manualCropAmount * 2;
+    }
     
     // Expanded canvas dimensions
     const newWidth = origWidth + (bleedAmount * 2);
@@ -518,14 +536,14 @@ export async function stitchBugToPDF(
     const highResCanvas = document.createElement('canvas');
     highResCanvas.width = Math.round((origWidth + (bleedAmount * 2)) * renderScale);
     highResCanvas.height = Math.round((origHeight + (bleedAmount * 2)) * renderScale);
-    const hrCtx = highResCanvas.getContext('2d');
+    const hrCtx = highResCanvas.getContext('2d', { willReadFrequently: true });
     
     // Render original vector page to a temp canvas
     const tempCanvasFull = document.createElement('canvas');
     tempCanvasFull.width = Math.round(viewport.width);
     tempCanvasFull.height = Math.round(viewport.height);
     await pdfjsPage.render({
-      canvasContext: tempCanvasFull.getContext('2d'),
+      canvasContext: tempCanvasFull.getContext('2d', { willReadFrequently: true }),
       viewport
     }).promise;
 
@@ -533,19 +551,15 @@ export async function stitchBugToPDF(
     const tempCanvasBase = document.createElement('canvas');
     tempCanvasBase.width = Math.round(origWidth * renderScale);
     tempCanvasBase.height = Math.round(origHeight * renderScale);
-    const tcbCtx = tempCanvasBase.getContext('2d');
+    const tcbCtx = tempCanvasBase.getContext('2d', { willReadFrequently: true });
     
-    if (trimCropEnabled) {
-      const offsetX = (trimBox.x - cropBox.x) * renderScale;
-      const offsetY = (cropBox.height - (trimBox.y - cropBox.y + trimBox.height)) * renderScale;
-      tcbCtx.drawImage(
-        tempCanvasFull,
-        Math.round(offsetX), Math.round(offsetY), Math.round(origWidth * renderScale), Math.round(origHeight * renderScale),
-        0, 0, Math.round(origWidth * renderScale), Math.round(origHeight * renderScale)
-      );
-    } else {
-      tcbCtx.drawImage(tempCanvasFull, 0, 0);
-    }
+    const offsetX = ((trimCropEnabled ? (trimBox.x - cropBox.x) : 0) + manualCropAmount) * renderScale;
+    const offsetY = ((trimCropEnabled ? (cropBox.height - (trimBox.y - cropBox.y + trimBox.height)) : 0) + manualCropAmount) * renderScale;
+    tcbCtx.drawImage(
+      tempCanvasFull,
+      Math.round(offsetX), Math.round(offsetY), Math.round(origWidth * renderScale), Math.round(origHeight * renderScale),
+      0, 0, Math.round(origWidth * renderScale), Math.round(origHeight * renderScale)
+    );
     
     // Apply mirror bleed algorithm at high resolution (background layers only)
     drawMirrorBleed(hrCtx, tempCanvasBase, origWidth * renderScale, origHeight * renderScale, bleedAmount * renderScale);
@@ -567,8 +581,8 @@ export async function stitchBugToPDF(
     newPage.setBleedBox(0, 0, newWidth, newHeight);
     
     // Position the TrimBox precisely, accounting for the bleed offset
-    const newTrimX = trimCropEnabled ? bleedAmount : (bleedAmount + (trimBox.x - cropBox.x));
-    const newTrimY = trimCropEnabled ? bleedAmount : (bleedAmount + (trimBox.y - cropBox.y));
+    const newTrimX = trimCropEnabled ? (bleedAmount - manualCropAmount) : (bleedAmount + (trimBox.x - cropBox.x) - manualCropAmount);
+    const newTrimY = trimCropEnabled ? (bleedAmount - manualCropAmount) : (bleedAmount + (trimBox.y - cropBox.y) - manualCropAmount);
     newPage.setTrimBox(newTrimX, newTrimY, trimBox.width, trimBox.height);
 
     // Overlay the vector Union Bug if enabled and targeted for this page
