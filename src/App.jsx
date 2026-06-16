@@ -865,7 +865,7 @@ export default function App() {
       {/* Premium Glassmorphic Header */}
       <header className="app-header">
         <div className="logo-section" onClick={handleClearArtwork} style={{ cursor: 'pointer' }} title="Go to Homepage">
-          <Shield size={24} className="logo-icon" />
+          <img src="/favicon.png" alt="Logo" style={{ height: '28px', width: '28px' }} className="logo-icon" />
           <h1>Overnight Preflight Tool</h1>
           <span className="logo-badge">v1.3.0</span>
         </div>
@@ -897,10 +897,7 @@ export default function App() {
               <span>Auto</span>
             </button>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', fontSize: '13px' }}>
-            <HelpCircle size={16} />
-            
-          </div>
+
         </div>
       </header>
 
