@@ -197,6 +197,8 @@ export default function App() {
     setCurrentAlignment('right'); // Reset to default right alignment on new artwork
     setHasDoneInitialAlignment(false); // Reset initial alignment flag to trigger bottom placement on canvas load
     setOriginalImage(null);
+    setPdfBoxInfo(null);
+    setPreflightResults(null);
     
     try {
       const extension = file.name.split('.').pop().toLowerCase();

@@ -61,6 +61,7 @@ export default function UploadZone({
         onFileSelect(file);
       }
     }
+    e.target.value = null;
   };
 
   const onButtonClick = () => {
