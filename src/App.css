@@ -3,8 +3,8 @@
   flex-direction: column;
   height: 100vh;
   max-height: 100vh;
-  background: radial-gradient(circle at top right, rgba(168, 85, 247, 0.08), transparent 40%),
-              radial-gradient(circle at bottom left, rgba(20, 184, 166, 0.08), transparent 45%);
+  background: radial-gradient(circle at top right, rgba(40, 51, 119, 0.15), transparent 40%),
+              radial-gradient(circle at bottom left, rgba(137, 197, 232, 0.15), transparent 45%);
 }
 
 /* Header */
@@ -45,7 +45,7 @@
   color: var(--primary-hover);
   padding: 2px 8px;
   border-radius: 99px;
-  border: 1px solid rgba(168, 85, 247, 0.2);
+  border: 1px solid rgba(40, 51, 119, 0.3);
   font-weight: 600;
 }
 
@@ -211,7 +211,7 @@
 
 .draggable-bug:hover, .draggable-bug.active {
   border-color: var(--primary);
-  background: rgba(168, 85, 247, 0.05);
+  background: rgba(40, 51, 119, 0.1);
 }
 
 .draggable-bug img {
@@ -251,7 +251,7 @@
 .spinner {
   width: 40px;
   height: 40px;
-  border: 3px solid rgba(168, 85, 247, 0.2);
+  border: 3px solid rgba(40, 51, 119, 0.3);
   border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -361,7 +361,7 @@
 
 .dropzone:hover, .dropzone.active {
   border-color: var(--primary);
-  background: rgba(168, 85, 247, 0.03);
+  background: rgba(40, 51, 119, 0.05);
 }
 
 .dropzone-icon {
