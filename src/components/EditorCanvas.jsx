@@ -301,11 +301,11 @@ export default function EditorCanvas({
           zIndex: 20
         }}
       >
-        <button className="zoom-btn" onClick={() => onZoomChange(Math.max(0.1, zoom - 0.1))} title="축소"><ZoomOut size={16} /></button>
+        <button className="zoom-btn" onClick={() => onZoomChange(Math.max(0.1, zoom - 0.1))} title="Zoom Out"><ZoomOut size={16} /></button>
         <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', minWidth: '45px', textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
-        <button className="zoom-btn" onClick={() => onZoomChange(Math.min(3.0, zoom + 0.1))} title="확대"><ZoomIn size={16} /></button>
+        <button className="zoom-btn" onClick={() => onZoomChange(Math.min(3.0, zoom + 0.1))} title="Zoom In"><ZoomIn size={16} /></button>
         <div style={{ width: '1px', height: '16px', background: 'var(--border-color)' }} />
-        <button className="zoom-btn" onClick={handleFitToHeight} title="화면에 맞춤"><Maximize2 size={15} /></button>
+        <button className="zoom-btn" onClick={handleFitToHeight} title="Fit to Screen"><Maximize2 size={15} /></button>
       </div>
     </div>
   );

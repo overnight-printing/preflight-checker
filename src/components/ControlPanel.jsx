@@ -48,19 +48,19 @@ export default function ControlPanel({
       {/* 0. Toggle Bug Stamping Activity */}
       <div className="sidebar-section">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-          <span className="section-title" style={{ marginBottom: 0 }}>스탬프 활성화</span>
+          <span className="section-title" style={{ marginBottom: 0 }}>Enable Union Bug</span>
           <button 
             className="btn btn-secondary" 
             style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', borderStyle: 'dashed' }}
             onClick={onReset}
-            title="모든 프리플라이트 수정 및 크롭을 취소하고 원본 파일로 되돌립니다."
+            title="Reset to original artwork"
           >
-            🔄 아트워크 초기화
+            🔄 Reset Artwork
           </button>
         </div>
         <div className="toggle-item" style={{ borderLeft: bugEnabled ? '3px solid var(--primary)' : '1px solid var(--border-color)' }}>
           <div className="toggle-info">
-            <h5 style={{ color: bugEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>유니언버그 인쇄 적용</h5>
+            <h5 style={{ color: bugEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Apply Union Bug</h5>
           </div>
           <label className="switch">
             <input
@@ -78,7 +78,7 @@ export default function ControlPanel({
         <>
           {/* 1. Quick Alignment Tools */}
           <div className="sidebar-section">
-            <span className="section-title">퀵 정렬 도구</span>
+            <span className="section-title">Quick Align</span>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 className="btn btn-secondary"
@@ -86,7 +86,7 @@ export default function ControlPanel({
                 onClick={() => onQuickAlign('left')}
               >
                 <AlignLeft size={16} />
-                좌측 정렬
+                Align Left
               </button>
               <button
                 className="btn btn-secondary"
@@ -94,7 +94,7 @@ export default function ControlPanel({
                 onClick={() => onQuickAlign('center')}
               >
                 <AlignCenter size={16} />
-                가운데 정렬
+                Align Center
               </button>
               <button
                 className="btn btn-secondary"
@@ -102,20 +102,18 @@ export default function ControlPanel({
                 onClick={() => onQuickAlign('right')}
               >
                 <AlignRight size={16} />
-                우측 정렬
+                Align Right
               </button>
             </div>
-            <p style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'center', marginTop: '6px' }}>
-              * 클릭 시 안전 마진 내 하단 영역에 칼같이 정렬 배치됩니다.
-            </p>
+            
           </div>
 
           {/* 2. Style & Size Controls */}
           <div className="sidebar-section">
-            <span className="section-title">버그 크기 조절</span>
+            <span className="section-title">Bug Size</span>
             <div className="slider-group">
               <div className="slider-labels">
-                <span>크기 비율</span>
+                <span>Scale</span>
                 <span className="slider-val">{bugScale}% ({getBugInchDimensions()})</span>
               </div>
               <input
@@ -130,7 +128,7 @@ export default function ControlPanel({
 
           {/* 3. Color Theme Picker */}
           <div className="sidebar-section">
-            <span className="section-title">버그 색상 변환</span>
+            <span className="section-title">Bug Color</span>
             
             {/* Preset Modes */}
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
@@ -139,21 +137,21 @@ export default function ControlPanel({
                 style={{ flex: 1, padding: '6px 12px', fontSize: '12px' }}
                 onClick={() => onColorModeChange('auto')}
               >
-                대비 자동
+                Auto Contrast
               </button>
               <button
                 className={`btn btn-secondary ${colorMode === 'preset' ? 'btn-primary' : ''}`}
                 style={{ flex: 1, padding: '6px 12px', fontSize: '12px' }}
                 onClick={() => onColorModeChange('preset')}
               >
-                팔레트
+                Palette
               </button>
               <button
                 className={`btn btn-secondary ${colorMode === 'custom' ? 'btn-primary' : ''}`}
                 style={{ flex: 1, padding: '6px 12px', fontSize: '12px' }}
                 onClick={() => onColorModeChange('custom')}
               >
-                커스텀
+                Custom
               </button>
             </div>
 
@@ -172,14 +170,14 @@ export default function ControlPanel({
               }}>
                 <ShieldCheck size={18} className="logo-icon" style={{ color: 'var(--accent)' }} />
                 <div>
-                  <span>현재 배치 영역의 배경색 대조 대비에 따라 <strong>블랙</strong> 또는 <strong>화이트</strong>로 자동 최적화됩니다.</span>
+                  <span>Auto-optimized to Black or White based on background.</span>
                 </div>
               </div>
             )}
 
             {colorMode === 'preset' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>추천 색상 팔레트</span>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Recommended Palette</span>
                 <div className="color-grid">
                   {extractedColors.map((color, index) => (
                     <div
@@ -214,12 +212,12 @@ export default function ControlPanel({
 
       {/* 4. Display Toggles */}
       <div className="sidebar-section">
-        <span className="section-title">출력 여백 설정</span>
+        <span className="section-title">Margin Settings</span>
 
         {/* Mirror Bleed Toggle */}
         <div className="toggle-item" style={{ borderLeft: bleedEnabled ? '3px solid var(--accent)' : '1px solid var(--border-color)' }}>
           <div className="toggle-info">
-            <h5 style={{ color: bleedEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>0.125인치 미러 블리드 추가</h5>
+            <h5 style={{ color: bleedEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Add 0.125" Mirror Bleed</h5>
           </div>
           <label className="switch">
             <input
@@ -234,8 +232,8 @@ export default function ControlPanel({
         {/* Advanced: Crop to TrimBox Toggle */}
         <div className="toggle-item" style={{ borderLeft: trimCropEnabled ? '3px solid #ff4d4d' : '1px solid var(--border-color)' }}>
           <div className="toggle-info">
-            <h5 style={{ color: trimCropEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>재단선 기준으로 자르기</h5>
-            <p style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>크랍마크 제거 및 정사이즈 크롭</p>
+            <h5 style={{ color: trimCropEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Crop to Trim Box</h5>
+            
           </div>
           <label className="switch">
             <input
@@ -256,7 +254,7 @@ export default function ControlPanel({
           border: '1px solid var(--border-color)'
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)' }}>여백 추가 커트 (Manual)</span>
+            <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)' }}>Manual Crop</span>
             <span style={{ fontSize: '11px', color: 'var(--accent)', fontWeight: '700' }}>
               {(manualCropAmount / 72).toFixed(3)}"
             </span>
@@ -314,7 +312,7 @@ export default function ControlPanel({
         {/* Safe Margin Guide Line Toggle */}
         <div className="toggle-item">
           <div className="toggle-info">
-            <h5>안전 영역 가이드</h5>
+            <h5>Safe Zone Guide</h5>
           </div>
           <label className="switch">
             <input
@@ -330,7 +328,7 @@ export default function ControlPanel({
       {/* 5. PDF Multipage Apply Settings */}
       {isMultiPage && bugEnabled && (
         <div className="sidebar-section">
-          <span className="section-title">스탬프 적용 페이지</span>
+          <span className="section-title">Apply Pages</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <select
               style={{
@@ -346,10 +344,10 @@ export default function ControlPanel({
               value={multiPageOptions.applyTo}
               onChange={(e) => onMultiPageOptionsChange({ ...multiPageOptions, applyTo: e.target.value })}
             >
-              <option value="current">현재 페이지만 적용</option>
-              <option value="all">모든 페이지에 적용</option>
-              <option value="last">마지막 페이지에만 적용</option>
-              <option value="first">첫 번째 페이지에만 적용</option>
+              <option value="current">Current Page Only</option>
+              <option value="all">All Pages</option>
+              <option value="last">Last Page Only</option>
+              <option value="first">First Page Only</option>
             </select>
           </div>
         </div>

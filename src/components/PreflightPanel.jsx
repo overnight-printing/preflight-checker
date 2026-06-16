@@ -30,9 +30,9 @@ export default function PreflightPanel({
           gap: '12px'
         }}>
           <AlertCircle size={36} style={{ color: 'var(--warning)' }} />
-          <h4 style={{ fontSize: '15px', fontWeight: '600' }}>PDF 전용 기능</h4>
+          <h4 style={{ fontSize: '15px', fontWeight: '600' }}>PDF Only</h4>
           <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-            프리플라이트 검사는 PDF 문서에 최적화되어 있습니다. 이미지 파일은 검사를 진행할 수 없습니다. PDF 아트워크를 업로드해 주세요.
+            Preflight is only supported for PDF files. Please upload a PDF.
           </p>
         </div>
       </div>
@@ -44,7 +44,7 @@ export default function PreflightPanel({
       <div className="sidebar-content" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
           <Loader2 size={32} className="spinner" style={{ animation: 'spin 1s linear infinite', color: 'var(--primary)' }} />
-          <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>PDF 파일 규격 정밀 분석 중...</span>
+          <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Analyzing PDF...</span>
         </div>
       </div>
     );
@@ -75,13 +75,13 @@ export default function PreflightPanel({
 
   const getFixButtonText = (key) => {
     switch(key) {
-      case 'bleed': return '미러 도련 추가';
-      case 'overprint': return '오버프린트 제거';
-      case 'fontEmbedding': return '폰트 아웃라인 변환';
-      case 'spotColors': return 'CMYK로 변환';
-      case 'blankPages': return '빈 페이지 제거';
-      case 'hiddenLayers': return '레이어 병합';
-      default: return '자동 수정';
+      case 'bleed': return 'Add Mirror Bleed';
+      case 'overprint': return 'Remove Overprint';
+      case 'fontEmbedding': return 'Outline Fonts';
+      case 'spotColors': return 'Convert to CMYK';
+      case 'blankPages': return 'Remove Blank Pages';
+      case 'hiddenLayers': return 'Flatten Layers';
+      default: return 'Auto Fix';
     }
   };
 
@@ -90,14 +90,14 @@ export default function PreflightPanel({
       
       {/* 1. Preflight Title & Reset */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span className="section-title" style={{ marginBottom: 0 }}>인쇄 적합성 검사 요약</span>
+        <span className="section-title" style={{ marginBottom: 0 }}>Preflight Summary</span>
         <button 
           className="btn btn-secondary" 
           style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', borderStyle: 'dashed' }}
           onClick={onReset}
-          title="모든 프리플라이트 수정 및 크롭을 취소하고 원본 파일로 되돌립니다."
+          title="Reset to original artwork"
         >
-          🔄 아트워크 초기화
+          🔄 Reset Artwork
         </button>
       </div>
 
@@ -112,24 +112,24 @@ export default function PreflightPanel({
         alignItems: 'center'
       }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '600' }}>패스</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '600' }}>Pass</span>
           <span style={{ fontSize: '18px', fontWeight: '700', color: 'var(--success)', marginTop: '2px' }}>{passedCount}</span>
         </div>
         <div style={{ width: '1px', background: 'var(--border-color)', height: '24px' }} />
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '600' }}>경고</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '600' }}>Warning</span>
           <span style={{ fontSize: '18px', fontWeight: '700', color: 'var(--warning)', marginTop: '2px' }}>{warningCount}</span>
         </div>
         <div style={{ width: '1px', background: 'var(--border-color)', height: '24px' }} />
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '600' }}>오류 (수정가능)</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '600' }}>Error (Fixable)</span>
           <span style={{ fontSize: '18px', fontWeight: '700', color: 'var(--danger)', marginTop: '2px' }}>{errorCount}</span>
         </div>
       </div>
 
       {/* 3. Checks Checklist */}
       <div className="sidebar-section" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        <span className="section-title">인쇄 적합성 검사항목 (Preflight Checks)</span>
+        <span className="section-title">Preflight Checks</span>
         
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {Object.entries(results.checks).map(([key, check]) => {
@@ -202,17 +202,17 @@ export default function PreflightPanel({
 
 function getCheckTitle(key) {
   switch (key) {
-    case 'resolution': return '이미지 해상도 (Image Resolution)';
-    case 'bleed': return '도련 여백 설정 (Bleed)';
-    case 'overprint': return '오버프린트 설정 (Overprint)';
-    case 'fontEmbedding': return '폰트 임베딩 (Font Embedding)';
-    case 'colorMode': return '색상 모드 (Color Mode)';
-    case 'pageSize': return '페이지 규격 및 일치 여부 (Page Size)';
-    case 'transparency': return '투명도 효과 (Transparency)';
-    case 'spotColors': return '별색 사용 여부 (Spot Colors)';
-    case 'blankPages': return '빈 페이지 확인 (Blank Pages)';
-    case 'hiddenLayers': return '숨겨진 레이어 (Hidden Layers)';
-    case 'pdfVersionCheck': return 'PDF 호환성 버전 (PDF Version)';
+    case 'resolution': return 'Image Resolution';
+    case 'bleed': return 'Bleed Margin';
+    case 'overprint': return 'Overprint';
+    case 'fontEmbedding': return 'Font Embedding';
+    case 'colorMode': return 'Color Mode';
+    case 'pageSize': return 'Page Size Match';
+    case 'transparency': return 'Transparency';
+    case 'spotColors': return 'Spot Colors';
+    case 'blankPages': return 'Blank Pages';
+    case 'hiddenLayers': return 'Hidden Layers';
+    case 'pdfVersionCheck': return 'PDF Version';
     default: return key;
   }
 }

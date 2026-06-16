@@ -221,7 +221,7 @@ export default function App() {
       }
     } catch (error) {
       console.error('Error loading artwork file:', error);
-      alert('아트워크 파일을 읽는 중 오류가 발생했습니다.');
+      alert('Error loading artwork file.');
       setArtworkFile(null);
     } finally {
       setIsLoading(false);
@@ -343,7 +343,7 @@ export default function App() {
       setSourceHasBleed(extension === 'pdf');
     } catch (error) {
       console.error('Error resetting artwork:', error);
-      alert('초기화 중 오류가 발생했습니다.');
+      alert('Error resetting artwork.');
     } finally {
       setIsLoading(false);
     }
@@ -478,7 +478,7 @@ export default function App() {
       });
     } catch (error) {
       console.error('Error parsing Union Bug PDF:', error);
-      alert('유니언버그 PDF 파일을 읽는 중 오류가 발생했습니다.');
+      alert('Error loading Union Bug PDF.');
       setBugFile(null);
     } finally {
       setIsLoading(false);
@@ -505,7 +505,7 @@ export default function App() {
 
     const renderAndColorBug = async () => {
       try {
-        // 프리뷰 렌더링 해상도를 8.0 DPI (약 600 DPI 상당)로 대폭 상향하여 화면 확대 시에도 칼같은 벡터 선명함 유지
+        // Preview rendering resolution increased to 8.0 DPI (approx. 600 DPI equivalent) to maintain crisp vector sharpness even when zoomed in.
         const { canvas } = await processUnionBug(bugFile, activeColor, 8.0);
         setBugCanvas(canvas);
         setBugImageSrc(canvas.toDataURL('image/png'));
@@ -620,7 +620,7 @@ export default function App() {
       }
     } catch (error) {
       console.error(`Error fixing preflight check ${checkKey}:`, error);
-      alert(`오류를 해결하는 중 문제가 발생했습니다: ${error.message || '알 수 없는 오류'}`);
+      alert(`Error fixing issue: ${error.message || 'Unknown error'}`);
     } finally {
       setIsLoading(false);
     }
@@ -846,7 +846,7 @@ export default function App() {
       }
     } catch (error) {
       console.error('Export error:', error);
-      alert('파일을 저장하는 중 오류가 발생했습니다.');
+      alert('Error saving file.');
     } finally {
       setIsExporting(false);
     }
@@ -864,7 +864,7 @@ export default function App() {
     <div className="app-container">
       {/* Premium Glassmorphic Header */}
       <header className="app-header">
-        <div className="logo-section" onClick={handleClearArtwork} style={{ cursor: 'pointer' }} title="홈페이지로 이동">
+        <div className="logo-section" onClick={handleClearArtwork} style={{ cursor: 'pointer' }} title="Go to Homepage">
           <Shield size={24} className="logo-icon" />
           <h1>Overnight Preflight Tool</h1>
           <span className="logo-badge">v1.3.0</span>
@@ -875,7 +875,7 @@ export default function App() {
             <button 
               className={`theme-btn ${theme === 'light' ? 'active' : ''}`} 
               onClick={() => setTheme('light')}
-              title="라이트 모드"
+              title="Light Mode"
               style={{ padding: '6px' }}
             >
               <Sun size={14} />
@@ -883,7 +883,7 @@ export default function App() {
             <button 
               className={`theme-btn ${theme === 'dark' ? 'active' : ''}`} 
               onClick={() => setTheme('dark')}
-              title="다크 모드"
+              title="Dark Mode"
               style={{ padding: '6px' }}
             >
               <Moon size={14} />
@@ -891,15 +891,15 @@ export default function App() {
             <button 
               className={`theme-btn ${theme === 'system' ? 'active' : ''}`} 
               onClick={() => setTheme('system')}
-              title="시스템 설정 따름"
+              title="System Default"
             >
               <Monitor size={14} />
-              <span>자동</span>
+              <span>Auto</span>
             </button>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', fontSize: '13px' }}>
             <HelpCircle size={16} />
-            <span>100% 브라우저 자체 처리 (보안 안전)</span>
+            
           </div>
         </div>
       </header>
@@ -1034,8 +1034,8 @@ export default function App() {
             {/* 2. Control Sidebar Panel */}
             <aside className="control-sidebar">
               <div className="sidebar-header">
-                <h2>편집 및 조절 도구</h2>
-                <p>유니언버그 위치와 디자인을 세팅하세요</p>
+                <h2>Edit & Adjust</h2>
+                
               </div>
 
               {/* Tab Switcher */}
@@ -1045,14 +1045,14 @@ export default function App() {
                   onClick={() => setActiveSidebarTab('preflight')}
                 >
                   <ClipboardCheck size={14} />
-                  <span>프리플라이트</span>
+                  <span>Preflight</span>
                 </button>
                 <button 
                   className={`tab-btn ${activeSidebarTab === 'stamper' ? 'active' : ''}`}
                   onClick={() => setActiveSidebarTab('stamper')}
                 >
                   <Sparkles size={14} />
-                  <span>스탬퍼 설정</span>
+                  <span>Stamper Settings</span>
                 </button>
               </div>
 
@@ -1128,17 +1128,17 @@ export default function App() {
                   {isExporting ? (
                     <>
                       <UploadCloud size={18} className="spinner" style={{ animation: 'spin 1s linear infinite' }} />
-                      파일 생성 중...
+                      Generating file...
                     </>
                   ) : (
                     <>
                       <ClipboardCheck size={18} />
-                      최종 결과물 저장하기
+                      Save Final Output
                     </>
                   )}
                 </button>
                 <p style={{ fontSize: '10.5px', color: 'var(--text-secondary)', textAlign: 'center', marginTop: '8px' }}>
-                  * {bugEnabled ? '유니언버그와 ' : ''}프리플라이트 수정 사항이 모두 반영됩니다.
+                  * {bugEnabled ? '' : ''}All preflight fixes applied.
                 </p>
               </div>
 
@@ -1169,7 +1169,7 @@ export default function App() {
       {isLoading && (
         <div className="loading-overlay">
           <div className="spinner" />
-          <h4 style={{ fontSize: '15px', fontWeight: '500' }}>파일을 렌더링하고 레이아웃을 불러오는 중...</h4>
+          <h4 style={{ fontSize: '15px', fontWeight: '500' }}>Rendering and loading layout...</h4>
         </div>
       )}
 
@@ -1178,8 +1178,8 @@ export default function App() {
         <div className="global-drag-overlay">
           <div className="global-drag-content">
             <UploadCloud size={48} className="global-drag-icon" />
-            <h3>아트워크 PDF/이미지 업로드</h3>
-            <p>여기에 파일을 내려놓으면 자동으로 아트워크로 불러와 프리플라이트 검사를 진행합니다.</p>
+            <h3>Upload Artwork PDF/Image</h3>
+            <p>Drop files here to load and run preflight checks.</p>
           </div>
         </div>
       )}

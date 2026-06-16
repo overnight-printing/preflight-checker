@@ -374,13 +374,13 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   if (hasPageSizeMismatch) {
     results.checks.pageSize = {
       status: 'warning',
-      details: `페이지 규격이 일치하지 않습니다. 1페이지: ${sizeStr}, ${mismatchPageNum}페이지: ${mismatchSizeStr}.`,
+      details: `Page size mismatch. Page 1: ${sizeStr}, ${mismatchPageNum}Page: ${mismatchSizeStr}.`,
       value: { firstPageSize: sizeStr, mismatchPageNum, mismatchSize: mismatchSizeStr }
     };
   } else {
     results.checks.pageSize = {
       status: 'pass',
-      details: `모든 페이지 규격이 동일합니다: ${sizeStr}.`,
+      details: `All pages have the same size: ${sizeStr}.`,
       value: sizeStr
     };
   }
