@@ -45,11 +45,18 @@ export default function EditorCanvas({
   // If virtual mirror bleed is enabled, the artwork content is inset by 9pt (0.125").
   const virtualBleedPx = bleedEnabled ? (9.0 * canvasScale) : 0;
   
+  // Apply manual crop guides if crop mode is active
+  const cropLeftPx = isCropMode && manualCropGuides ? manualCropGuides.left : 0;
+  const cropTopPx = isCropMode && manualCropGuides ? manualCropGuides.top : 0;
+  const cropRightPx = isCropMode && manualCropGuides ? manualCropGuides.right : 0;
+  const cropBottomPx = isCropMode && manualCropGuides ? manualCropGuides.bottom : 0;
+
   // The Trim Line (Blue/Magenta) always marks the boundary between the artwork and the added bleed.
-  const trimLeftPx = virtualBleedPx;
-  const trimTopPx = virtualBleedPx;
-  const trimWidthPx = Math.max(0, canvasWidth - (virtualBleedPx * 2));
-  const trimHeightPx = Math.max(0, canvasHeight - (virtualBleedPx * 2));
+  // It shrinks inward if manual crop guides are active.
+  const trimLeftPx = virtualBleedPx + cropLeftPx;
+  const trimTopPx = virtualBleedPx + cropTopPx;
+  const trimWidthPx = Math.max(0, canvasWidth - (virtualBleedPx * 2) - cropLeftPx - cropRightPx);
+  const trimHeightPx = Math.max(0, canvasHeight - (virtualBleedPx * 2) - cropTopPx - cropBottomPx);
 
   // The Safe Zone (Cyan) is ALWAYS 9pt (0.125") inside the Trim Line.
   const safeInsetPx = 9.0 * canvasScale;

@@ -938,8 +938,21 @@ export default function App() {
                       const manualInset = manualCropAmount || 0;
                       const bleedOffset = bleedEnabled ? 9.0 : 0; // 0.125"
 
-                      const finalTrimW = baseBox.width - (manualInset * 2);
-                      const finalTrimH = baseBox.height - (manualInset * 2);
+                      let finalTrimW = baseBox.width - (manualInset * 2);
+                      let finalTrimH = baseBox.height - (manualInset * 2);
+
+                      if (isCropMode && manualCropGuides) {
+                        const guideLeftPt = manualCropGuides.left / canvasScale;
+                        const guideRightPt = manualCropGuides.right / canvasScale;
+                        const guideTopPt = manualCropGuides.top / canvasScale;
+                        const guideBottomPt = manualCropGuides.bottom / canvasScale;
+                        finalTrimW -= (guideLeftPt + guideRightPt);
+                        finalTrimH -= (guideTopPt + guideBottomPt);
+                      }
+
+                      finalTrimW = Math.max(1, finalTrimW);
+                      finalTrimH = Math.max(1, finalTrimH);
+
                       const finalCanvasW = finalTrimW + (bleedOffset * 2);
                       const finalCanvasH = finalTrimH + (bleedOffset * 2);
 
