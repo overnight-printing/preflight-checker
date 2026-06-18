@@ -25,6 +25,10 @@ export default function ControlPanel({
   onTrimCropToggle,
   manualCropAmount,
   onManualCropChange,
+  isCropMode,
+  onCropModeToggle,
+  manualCropGuides,
+  onManualCropGuidesChange,
   onReset
 }) {
 
@@ -244,6 +248,49 @@ export default function ControlPanel({
             <span className="slider-switch" />
           </label>
         </div>
+
+        {/* Visual Crop Marks Editor Toggle */}
+        <div className="toggle-item" style={{ borderLeft: isCropMode ? '3px solid #f59e0b' : '1px solid var(--border-color)', marginTop: '8px' }}>
+          <div className="toggle-info">
+            <h5 style={{ color: isCropMode ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Detect Crop Marks (Visual)</h5>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+              Define trim area manually
+            </p>
+          </div>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={isCropMode}
+              onChange={onCropModeToggle}
+            />
+            <span className="slider-switch" style={{ background: isCropMode ? '#f59e0b' : 'var(--bg-card)' }} />
+          </label>
+        </div>
+
+        {isCropMode && (
+          <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+            <h6 style={{ color: '#f59e0b', fontSize: '0.75rem', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Crop Guides (px)</h6>
+            {['top', 'right', 'bottom', 'left'].map(side => (
+              <div key={side} style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ width: '40px', fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'capitalize' }}>{side}</span>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="500" 
+                  value={manualCropGuides[side] || 0} 
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    if (onManualCropGuidesChange) {
+                      onManualCropGuidesChange(prev => ({ ...prev, [side]: val }));
+                    }
+                  }}
+                  style={{ flex: 1, margin: '0 12px' }}
+                />
+                <span style={{ width: '30px', fontSize: '0.75rem', color: 'var(--text-primary)', textAlign: 'right' }}>{manualCropGuides[side] || 0}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Manual Margin Inset Controls */}
         <div style={{ 

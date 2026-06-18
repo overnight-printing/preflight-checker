@@ -11,6 +11,11 @@ export default function EditorCanvas({
   canvasScale = 1.0,
   showSafeLine = true,
   bleedEnabled = false, // Added bleedEnabled to draw the actual Trim Line (Magenta)
+  trimCropEnabled = false,
+  manualCropAmount = 0,
+  isCropMode = false,
+  manualCropGuides = { top: 0, right: 0, bottom: 0, left: 0 },
+  onManualCropGuidesChange,
   bugEnabled = true, // Toggle to show/hide bug overlay
   zoom = 1.0,       // Zoom scale (0.1 to 3.0)
   onZoomChange,     // callback to update zoom
@@ -262,6 +267,24 @@ export default function EditorCanvas({
                     border: '1.5px dashed #00e5ff', // Cyan Dashed Line
                     pointerEvents: 'none',
                     zIndex: 2,
+                    boxSizing: 'border-box'
+                  }}
+                />
+             )}
+
+             {/* 3. Interactive Crop Mode Overlay */}
+             {isCropMode && (
+                <div 
+                  style={{
+                    position: 'absolute',
+                    top: `${manualCropGuides.top}px`,
+                    left: `${manualCropGuides.left}px`,
+                    width: `${canvasWidth - manualCropGuides.left - manualCropGuides.right}px`,
+                    height: `${canvasHeight - manualCropGuides.top - manualCropGuides.bottom}px`,
+                    border: '2px solid #f59e0b', // Orange crop box
+                    boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.5)', // Dim outside area
+                    pointerEvents: 'none',
+                    zIndex: 3,
                     boxSizing: 'border-box'
                   }}
                 />

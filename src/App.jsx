@@ -103,6 +103,9 @@ export default function App() {
   const [bleedEnabled, setBleedEnabled] = useState(false);
   const [trimCropEnabled, setTrimCropEnabled] = useState(false); // New non-destructive crop toggle
   const [manualCropAmount, setManualCropAmount] = useState(0); // Manual inset in points (72pt = 1 inch)
+  const [isCropMode, setIsCropMode] = useState(false); // Interactive visual crop mode
+  const [manualCropGuides, setManualCropGuides] = useState({ top: 0, right: 0, bottom: 0, left: 0 }); // Drag guides in % or px
+
   const [sourceHasBleed, setSourceHasBleed] = useState(true); // Default true for PDFs (0.125" / 9pt bleed included)
   const [originalImage, setOriginalImage] = useState(null); // Keeps the original Image element for reactive image bleed redraws
 
@@ -370,7 +373,7 @@ export default function App() {
       const canvas = document.createElement('canvas');
       
       // Render to canvas with bleed parameters (0.125" = 9.0pt) and optional trim/manual crop
-      await renderPDFPageToCanvas(page, canvas, canvasScale, bleedAmount, trimCrop, boxInfo, manualCrop);
+      await renderPDFPageToCanvas(page, canvas, canvasScale, bleedAmount, trimCrop, boxInfo, manualCrop, isCropMode, manualCropGuides);
       setArtworkCanvas(canvas);
 
       // Extract geometry metadata if we have the file
@@ -818,7 +821,9 @@ export default function App() {
           finalPositions,
           finalSizes,
           trimCropEnabled, // Pass non-destructive toggle
-          manualCropAmount // Pass manual inset
+          manualCropAmount, // Pass manual inset
+          isCropMode,
+          manualCropGuides
         );
         
         // Trigger browser download
@@ -984,6 +989,9 @@ export default function App() {
                 bleedEnabled={bleedEnabled} // Draw actual Magenta Trim Line
                 trimCropEnabled={trimCropEnabled} // New prop for non-destructive guide lines
                 manualCropAmount={manualCropAmount} // Pass manual inset for guide alignment
+                isCropMode={isCropMode}
+                manualCropGuides={manualCropGuides}
+                onManualCropGuidesChange={setManualCropGuides}
                 bugEnabled={bugEnabled}
                 zoom={zoom}
                 onZoomChange={setZoom}
@@ -1081,6 +1089,10 @@ export default function App() {
                   onTrimCropToggle={() => setTrimCropEnabled(!trimCropEnabled)}
                   manualCropAmount={manualCropAmount}
                   onManualCropChange={setManualCropAmount}
+                  isCropMode={isCropMode}
+                  onCropModeToggle={() => setIsCropMode(!isCropMode)}
+                  manualCropGuides={manualCropGuides}
+                  onManualCropGuidesChange={setManualCropGuides}
                   bugEnabled={bugEnabled}
                   onBugEnabledToggle={() => setBugEnabled(!bugEnabled)}
                   onQuickAlign={handleQuickAlign}

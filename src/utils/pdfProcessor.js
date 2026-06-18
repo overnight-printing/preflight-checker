@@ -215,9 +215,11 @@ export function drawMirrorBleed(ctx, orig, W, H, B) {
  * @param {boolean} trimCropEnabled - If true, crops the render to the TrimBox
  * @param {Object} pdfBoxInfo - Box dimensions for the page
  * @param {number} manualCropAmount - Manual inset in PDF points
+ * @param {boolean} isCropMode - If true, visual crop mode is active
+ * @param {Object} manualCropGuides - Pixels from edges {top, right, bottom, left}
  * @returns {Promise<{width: number, height: number}>}
  */
-export async function renderPDFPageToCanvas(page, canvas, scale = 1.5, bleedAmount = 0, trimCropEnabled = false, pdfBoxInfo = null, manualCropAmount = 0) {
+export async function renderPDFPageToCanvas(page, canvas, scale = 1.5, bleedAmount = 0, trimCropEnabled = false, pdfBoxInfo = null, manualCropAmount = 0, isCropMode = false, manualCropGuides = null) {
   const viewport = page.getViewport({ scale });
   
   let originalWidth = viewport.width;
@@ -244,6 +246,18 @@ export async function renderPDFPageToCanvas(page, canvas, scale = 1.5, bleedAmou
     offsetX += manualOffsetPx;
     offsetY += manualOffsetPx;
   }
+
+  // Apply interactive visual crop guides
+  if (isCropMode && manualCropGuides) {
+    originalWidth -= (manualCropGuides.left + manualCropGuides.right);
+    originalHeight -= (manualCropGuides.top + manualCropGuides.bottom);
+    offsetX += manualCropGuides.left;
+    offsetY += manualCropGuides.top;
+  }
+
+  // Prevent negative or zero dimensions
+  originalWidth = Math.max(1, originalWidth);
+  originalHeight = Math.max(1, originalHeight);
 
   const bleedPx = Math.round(bleedAmount * scale);
   
@@ -422,7 +436,9 @@ export async function stitchBugToPDF(
   pagePositions = {},
   pageSizes = {},
   trimCropEnabled = false,
-  manualCropAmount = 0
+  manualCropAmount = 0,
+  isCropMode = false,
+  manualCropGuides = null
 ) {
   const originalBytes = await originalPDFFile.arrayBuffer();
   const pdfDoc = await PDFDocument.load(originalBytes);
@@ -451,9 +467,9 @@ export async function stitchBugToPDF(
     }
   }
   
-  // Option A: Standard Vector Overlay (Bleed is Disabled AND no manual crop)
-  // Note: if manualCrop is active, we MUST go through the rasterize-and-crop path (Option B)
-  if (bleedAmount === 0 && manualCropAmount === 0) {
+  // Option A: Standard Vector Overlay (Bleed is Disabled AND no manual crop AND no interactive crop)
+  // Note: if manualCrop or isCropMode is active, we MUST go through the rasterize-and-crop path (Option B)
+  if (bleedAmount === 0 && manualCropAmount === 0 && !isCropMode) {
     if (bugEnabled && embeddedBugPage) {
       for (const pageNum of pagesToStitch) {
         if (pageNum < 1 || pageNum > pages.length) continue;
@@ -461,6 +477,9 @@ export async function stitchBugToPDF(
         const page = pages[pageNum - 1];
         const cropBox = page.getCropBox();
         const trimBox = page.getTrimBox() || cropBox;
+
+        // Note: Option A doesn't execute if manualCropAmount > 0 or isCropMode is true.
+        // We will force Option B if isCropMode is true below.
 
         // If trimCropEnabled is true, we act as if the TrimBox IS the entire page area
         const activeBaseBox = trimCropEnabled ? trimBox : cropBox;
@@ -522,6 +541,20 @@ export async function stitchBugToPDF(
       origHeight -= manualCropAmount * 2;
     }
     
+    // Apply interactive visual crop guides
+    if (isCropMode && manualCropGuides) {
+      const guideLeftPt = manualCropGuides.left / canvasScale;
+      const guideRightPt = manualCropGuides.right / canvasScale;
+      const guideTopPt = manualCropGuides.top / canvasScale;
+      const guideBottomPt = manualCropGuides.bottom / canvasScale;
+      origWidth -= (guideLeftPt + guideRightPt);
+      origHeight -= (guideTopPt + guideBottomPt);
+    }
+
+    // Prevent negative or zero dimensions
+    origWidth = Math.max(1, origWidth);
+    origHeight = Math.max(1, origHeight);
+
     // Expanded canvas dimensions
     const newWidth = origWidth + (bleedAmount * 2);
     const newHeight = origHeight + (bleedAmount * 2);
@@ -553,8 +586,14 @@ export async function stitchBugToPDF(
     tempCanvasBase.height = Math.round(origHeight * renderScale);
     const tcbCtx = tempCanvasBase.getContext('2d', { willReadFrequently: true });
     
-    const offsetX = ((trimCropEnabled ? (trimBox.x - cropBox.x) : 0) + manualCropAmount) * renderScale;
-    const offsetY = ((trimCropEnabled ? (cropBox.height - (trimBox.y - cropBox.y + trimBox.height)) : 0) + manualCropAmount) * renderScale;
+    let offsetX = ((trimCropEnabled ? (trimBox.x - cropBox.x) : 0) + manualCropAmount) * renderScale;
+    let offsetY = ((trimCropEnabled ? (cropBox.height - (trimBox.y - cropBox.y + trimBox.height)) : 0) + manualCropAmount) * renderScale;
+    
+    if (isCropMode && manualCropGuides) {
+      offsetX += (manualCropGuides.left / canvasScale) * renderScale;
+      offsetY += (manualCropGuides.top / canvasScale) * renderScale;
+    }
+
     tcbCtx.drawImage(
       tempCanvasFull,
       Math.round(offsetX), Math.round(offsetY), Math.round(origWidth * renderScale), Math.round(origHeight * renderScale),
