@@ -29,6 +29,8 @@ export default function ControlPanel({
   onCropModeToggle,
   manualCropGuides,
   onManualCropGuidesChange,
+  onAutoDetectCropMarks,
+  isAutoDetecting,
   onReset
 }) {
 
@@ -269,7 +271,24 @@ export default function ControlPanel({
 
         {isCropMode && (
           <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
-            <h6 style={{ color: '#f59e0b', fontSize: '0.75rem', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Crop Guides (px)</h6>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <h6 style={{ color: '#f59e0b', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Crop Guides (px)</h6>
+              <button 
+                className="secondary-btn" 
+                onClick={onAutoDetectCropMarks}
+                disabled={isAutoDetecting}
+                style={{ 
+                  padding: '4px 8px', 
+                  fontSize: '0.7rem', 
+                  backgroundColor: 'rgba(245, 158, 11, 0.1)', 
+                  color: '#f59e0b', 
+                  border: '1px solid rgba(245, 158, 11, 0.3)',
+                  opacity: isAutoDetecting ? 0.5 : 1
+                }}
+              >
+                {isAutoDetecting ? 'Detecting...' : 'Auto-Detect'}
+              </button>
+            </div>
             {['top', 'right', 'bottom', 'left'].map(side => (
               <div key={side} style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
                 <span style={{ width: '40px', fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'capitalize' }}>{side}</span>

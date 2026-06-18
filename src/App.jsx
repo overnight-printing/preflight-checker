@@ -13,7 +13,8 @@ import {
   processUnionBug,
   stitchBugToPDF,
   stitchBugToImage,
-  drawMirrorBleed
+  drawMirrorBleed,
+  autoDetectCropMarks
 } from './utils/pdfProcessor';
 
 import {
@@ -104,7 +105,8 @@ export default function App() {
   const [trimCropEnabled, setTrimCropEnabled] = useState(false); // New non-destructive crop toggle
   const [manualCropAmount, setManualCropAmount] = useState(0); // Manual inset in points (72pt = 1 inch)
   const [isCropMode, setIsCropMode] = useState(false); // Interactive visual crop mode
-  const [manualCropGuides, setManualCropGuides] = useState({ top: 0, right: 0, bottom: 0, left: 0 }); // Drag guides in % or px
+  const [manualCropGuides, setManualCropGuides] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
+  const [isAutoDetecting, setIsAutoDetecting] = useState(false); // Drag guides in % or px
 
   const [sourceHasBleed, setSourceHasBleed] = useState(true); // Default true for PDFs (0.125" / 9pt bleed included)
   const [originalImage, setOriginalImage] = useState(null); // Keeps the original Image element for reactive image bleed redraws
@@ -144,6 +146,24 @@ export default function App() {
   const [multiPageOptions, setMultiPageOptions] = useState({
     applyTo: 'current', // 'current' | 'all' | 'last' | 'first'
   });
+
+  const handleAutoDetectCropMarks = async () => {
+    if (!artworkCanvas) return;
+    setIsAutoDetecting(true);
+    
+    // Slight timeout to allow UI to show loading state if needed
+    setTimeout(() => {
+      const detected = autoDetectCropMarks(artworkCanvas);
+      if (detected) {
+        setIsCropMode(true);
+        setManualCropGuides(detected);
+        console.log('Crop marks auto-detected:', detected);
+      } else {
+        alert('Could not automatically detect crop marks. Please adjust manually.');
+      }
+      setIsAutoDetecting(false);
+    }, 100);
+  };
 
   // Track if we completed the initial alignment placement for a newly loaded artwork
   const [hasDoneInitialAlignment, setHasDoneInitialAlignment] = useState(false);
@@ -1106,6 +1126,8 @@ export default function App() {
                   onCropModeToggle={() => setIsCropMode(!isCropMode)}
                   manualCropGuides={manualCropGuides}
                   onManualCropGuidesChange={setManualCropGuides}
+                  onAutoDetectCropMarks={handleAutoDetectCropMarks}
+                  isAutoDetecting={isAutoDetecting}
                   bugEnabled={bugEnabled}
                   onBugEnabledToggle={() => setBugEnabled(!bugEnabled)}
                   onQuickAlign={handleQuickAlign}

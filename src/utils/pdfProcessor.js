@@ -700,3 +700,127 @@ export function stitchBugToImage(artworkCanvas, tintedBugCanvas, position, bugSi
   
   return outputCanvas.toDataURL('image/png');
 }
+
+/**
+ * Computer Vision Algorithm to automatically detect printed crop marks.
+ * Scans the outer 15% margins for continuous vertical and horizontal dark lines.
+ * Returns { top, right, bottom, left } in pixels, or null if detection fails.
+ * 
+ * @param {HTMLCanvasElement} canvas - The high-resolution canvas to analyze
+ * @returns {Object|null}
+ */
+export function autoDetectCropMarks(canvas) {
+  try {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const W = canvas.width;
+    const H = canvas.height;
+    const imgData = ctx.getImageData(0, 0, W, H);
+    const data = imgData.data;
+
+    const threshold = 150; // Brightness < 150 is considered dark
+    const minLineLength = 30; // Minimum pixels to be considered a crop mark line
+
+    const getPixel = (x, y) => {
+      if (x < 0 || x >= W || y < 0 || y >= H) return 255;
+      const i = (y * W + x) * 4;
+      // Return perceived brightness
+      return (data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114);
+    };
+
+    const isDark = (x, y) => getPixel(x, y) < threshold;
+
+    const searchX = Math.floor(W * 0.15);
+    const searchY = Math.floor(H * 0.15);
+
+    let leftInset = 0;
+    let rightInset = 0;
+    let topInset = 0;
+    let bottomInset = 0;
+
+    // Helper: find longest vertical line in a bounding box
+    const findVerticalLine = (startX, endX, startY, endY, directionX) => {
+      let bestX = -1;
+      let maxLen = 0;
+      const stepX = directionX > 0 ? 1 : -1;
+      
+      for (let x = startX; directionX > 0 ? x <= endX : x >= endX; x += stepX) {
+        let currentLen = 0;
+        let localMax = 0;
+        for (let y = startY; y <= endY; y++) {
+          if (isDark(x, y)) {
+            currentLen++;
+            if (currentLen > localMax) localMax = currentLen;
+          } else {
+            currentLen = 0;
+          }
+        }
+        if (localMax >= minLineLength && localMax > maxLen) {
+          maxLen = localMax;
+          bestX = x;
+          // We found the outermost line, so we can stop searching deeper? 
+          // Actually, we want the outermost line. Since we start from edge, the first good match is usually it.
+          if (maxLen > minLineLength * 1.5) return bestX;
+        }
+      }
+      return bestX;
+    };
+
+    // Helper: find longest horizontal line in a bounding box
+    const findHorizontalLine = (startX, endX, startY, endY, directionY) => {
+      let bestY = -1;
+      let maxLen = 0;
+      const stepY = directionY > 0 ? 1 : -1;
+
+      for (let y = startY; directionY > 0 ? y <= endY : y >= endY; y += stepY) {
+        let currentLen = 0;
+        let localMax = 0;
+        for (let x = startX; x <= endX; x++) {
+          if (isDark(x, y)) {
+            currentLen++;
+            if (currentLen > localMax) localMax = currentLen;
+          } else {
+            currentLen = 0;
+          }
+        }
+        if (localMax >= minLineLength && localMax > maxLen) {
+          maxLen = localMax;
+          bestY = y;
+          if (maxLen > minLineLength * 1.5) return bestY;
+        }
+      }
+      return bestY;
+    };
+
+    // 1. Left Inset (Scan vertical lines from left edge inward, checking top-left quadrant)
+    const leftX = findVerticalLine(0, searchX, 0, searchY, 1);
+    if (leftX !== -1) leftInset = leftX;
+
+    // 2. Right Inset (Scan vertical lines from right edge inward, checking top-right quadrant)
+    const rightX = findVerticalLine(W - 1, W - searchX, 0, searchY, -1);
+    if (rightX !== -1) rightInset = (W - 1) - rightX;
+
+    // 3. Top Inset (Scan horizontal lines from top edge inward, checking top-left quadrant)
+    const topY = findHorizontalLine(0, searchX, 0, searchY, 1);
+    if (topY !== -1) topInset = topY;
+
+    // 4. Bottom Inset (Scan horizontal lines from bottom edge inward, checking bottom-left quadrant)
+    const bottomY = findHorizontalLine(0, searchX, H - 1, H - searchY, -1);
+    if (bottomY !== -1) bottomInset = (H - 1) - bottomY;
+
+    // If we didn't find at least one valid line, return null
+    if (leftInset === 0 && rightInset === 0 && topInset === 0 && bottomInset === 0) {
+      return null;
+    }
+
+    return {
+      top: topInset > 0 ? topInset : 0,
+      right: rightInset > 0 ? rightInset : 0,
+      bottom: bottomInset > 0 ? bottomInset : 0,
+      left: leftInset > 0 ? leftInset : 0
+    };
+  } catch (error) {
+    console.error('Auto-Detect Crop Marks Failed:', error);
+    return null;
+  }
+}
+
