@@ -133,21 +133,21 @@ export default function ControlPanel({
             {/* Preset Modes */}
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
               <button
-                className={`btn btn-secondary ${colorMode === 'auto' ? 'btn-primary' : ''}`}
+                className={`btn ${colorMode === 'auto' ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ flex: 1, padding: '6px 12px', fontSize: '12px' }}
                 onClick={() => onColorModeChange('auto')}
               >
                 Auto Contrast
               </button>
               <button
-                className={`btn btn-secondary ${colorMode === 'preset' ? 'btn-primary' : ''}`}
+                className={`btn ${colorMode === 'preset' ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ flex: 1, padding: '6px 12px', fontSize: '12px' }}
                 onClick={() => onColorModeChange('preset')}
               >
                 Palette
               </button>
               <button
-                className={`btn btn-secondary ${colorMode === 'custom' ? 'btn-primary' : ''}`}
+                className={`btn ${colorMode === 'custom' ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ flex: 1, padding: '6px 12px', fontSize: '12px' }}
                 onClick={() => onColorModeChange('custom')}
               >
@@ -299,7 +299,7 @@ export default function ControlPanel({
             {[0, 0.125, 0.25, 0.375, 0.5].map(inch => (
               <button
                 key={inch}
-                className={`btn btn-secondary ${manualCropAmount === inch * 72 ? 'btn-primary' : ''}`}
+                className={`btn ${manualCropAmount === inch * 72 ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ flex: 1, padding: '4px 0', fontSize: '10px', minWidth: '45px' }}
                 onClick={() => onManualCropChange(inch * 72)}
               >
