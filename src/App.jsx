@@ -874,7 +874,7 @@ export default function App() {
         <div className="logo-section" onClick={handleClearArtwork} style={{ cursor: 'pointer' }} title="Go to Homepage">
           <img src="/favicon.png" alt="Logo" style={{ height: '28px', width: '28px', borderRadius: '50%' }} className="logo-icon" />
           <h1>Overnight Preflight Tool</h1>
-          <span className="logo-badge">v1.3.0</span>
+          <span className="logo-badge">v{import.meta.env.VITE_APP_VERSION}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           {/* Theme switcher */}
