@@ -11,6 +11,7 @@ export default function EditorCanvas({
   canvasScale = 1.0,
   showSafeLine = true,
   bleedEnabled = false, // Added bleedEnabled to draw the actual Trim Line (Magenta)
+  bleedAmount = 9.0,    // Added mirror bleed in PDF points
   isCropMode = false,
   manualCropGuides = { top: 0, right: 0, bottom: 0, left: 0 },
   bugEnabled = true, // Toggle to show/hide bug overlay
@@ -39,8 +40,8 @@ export default function EditorCanvas({
   // REFACTORED GUIDE LINE LOGIC: 
   // Anchor everything to the CURRENT processed artwork canvas, not metadata.
   
-  // If virtual mirror bleed is enabled, the artwork content is inset by 9pt (0.125").
-  const virtualBleedPx = bleedEnabled ? (9.0 * canvasScale) : 0;
+  // If virtual mirror bleed is enabled, inset the artwork by the selected bleed.
+  const virtualBleedPx = bleedEnabled ? (bleedAmount * canvasScale) : 0;
   
   // Apply manual crop guides if crop mode is active
   const cropLeftPx = isCropMode && manualCropGuides ? manualCropGuides.left : 0;

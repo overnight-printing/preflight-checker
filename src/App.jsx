@@ -102,6 +102,7 @@ export default function App() {
 
   // Bleed settings
   const [bleedEnabled, setBleedEnabled] = useState(false);
+  const [bleedAmount, setBleedAmount] = useState(9.0); // Default 0.125" in PDF points
   const [trimCropEnabled, setTrimCropEnabled] = useState(false); // New non-destructive crop toggle
   const [manualCropAmount, setManualCropAmount] = useState(0); // Manual inset in points (72pt = 1 inch)
   const [isCropMode, setIsCropMode] = useState(false); // Interactive visual crop mode
@@ -425,14 +426,13 @@ export default function App() {
   };
 
   // Helper to render an image artwork to canvas with or without mirror bleed (called reactively)
-  const renderImageCanvas = (img, bleed, manualCrop = 0) => {
+  const renderImageCanvas = (img, bleed, selectedBleedAmount = 9.0, manualCrop = 0) => {
     const canvas = document.createElement('canvas');
     const W = img.width;
     const H = img.height;
     
-    // 0.125" is exactly 9.0 pt in PDF units. In pixels, B = bleedAmount * canvasScale
-    const bleedAmount = bleed ? 9.0 : 0;
-    const bleedPx = bleedAmount * canvasScale;
+    const activeBleedAmount = bleed ? selectedBleedAmount : 0;
+    const bleedPx = activeBleedAmount * canvasScale;
     
     // Convert manualCrop (pt) to pixels
     const manualCropPx = manualCrop * canvasScale;
@@ -481,12 +481,12 @@ export default function App() {
     const updateArtworkRender = async () => {
       setIsLoading(true);
       try {
-        const bleedAmount = bleedEnabled ? 9.0 : 0; // 0.125" = 9.0pt
+        const activeBleedAmount = bleedEnabled ? bleedAmount : 0;
         
         if (artworkType === 'pdf' && pdfDoc) {
-          await renderPage(pdfDoc, currentPage, bleedAmount, trimCropEnabled, pdfBoxInfo, manualCropAmount);
+          await renderPage(pdfDoc, currentPage, activeBleedAmount, trimCropEnabled, pdfBoxInfo, manualCropAmount);
         } else if (artworkType === 'image' && originalImage) {
-          renderImageCanvas(originalImage, bleedEnabled, manualCropAmount);
+          renderImageCanvas(originalImage, bleedEnabled, bleedAmount, manualCropAmount);
         }
       } catch (error) {
         console.error('Error updating artwork render:', error);
@@ -497,7 +497,7 @@ export default function App() {
     
     updateArtworkRender();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bleedEnabled, trimCropEnabled, manualCropAmount, currentPage, originalImage, pdfDoc, pdfBoxInfo]);
+  }, [bleedEnabled, bleedAmount, trimCropEnabled, manualCropAmount, currentPage, originalImage, pdfDoc, pdfBoxInfo]);
 
   // 2. Handle Union Bug File Upload
   const handleBugSelect = async (file) => {
@@ -672,8 +672,8 @@ export default function App() {
       // We align specifically based on the actual TrimBox, not the extra border margin.
       const { trimBox, cropBox } = pdfBoxInfo;
       
-      // If virtual mirror bleed is enabled, the canvas coordinates are offset by 9pt on all edges.
-      const virtualBleedOffset = bleedEnabled ? 9.0 : 0.0;
+      // If virtual mirror bleed is enabled, offset canvas coordinates by the selected amount.
+      const virtualBleedOffset = bleedEnabled ? bleedAmount : 0.0;
       
       // Calculate coordinates relative to CropBox (offsetting for virtual bleed if active)
       const trimLeft = (trimBox.x - cropBox.x) + virtualBleedOffset;
@@ -717,7 +717,7 @@ export default function App() {
     } else {
       // Fallback for images or PDFs that do not contain a defined TrimBox.
       // We align relative to the canvas outer edges, accounting for optionally added bleed padding.
-      const bleedPadding = (sourceHasBleed ? 9.0 : 0.0) + (bleedEnabled ? 9.0 : 0.0);
+      const bleedPadding = (sourceHasBleed ? 9.0 : 0.0) + (bleedEnabled ? bleedAmount : 0.0);
       const activeSafeMargin = (bleedPadding + 9.0) * canvasScale;
 
       let left = 100;
@@ -746,7 +746,7 @@ export default function App() {
     if (alignment !== 'custom') {
       setCurrentAlignment(alignment);
     }
-  }, [artworkCanvas, bugSize, bleedEnabled, sourceHasBleed, canvasScale, hasDoneInitialAlignment, pdfBoxInfo, currentPage]);
+  }, [artworkCanvas, bugSize, bleedEnabled, bleedAmount, sourceHasBleed, canvasScale, hasDoneInitialAlignment, pdfBoxInfo, currentPage]);
 
   // Automatically align bug if alignment mode is active (not custom)
   useEffect(() => {
@@ -759,7 +759,7 @@ export default function App() {
         handleQuickAlign(currentAlignment);
       }
     }
-  }, [currentAlignment, bleedEnabled, sourceHasBleed, bugSize, artworkCanvas, hasDoneInitialAlignment, handleQuickAlign]);
+  }, [currentAlignment, bleedEnabled, bleedAmount, sourceHasBleed, bugSize, artworkCanvas, hasDoneInitialAlignment, handleQuickAlign]);
 
   // Drag End handler to set custom alignment status
   const handleDragEnd = () => {
@@ -819,7 +819,7 @@ export default function App() {
     
     try {
       const safeFilename = artworkFile.name.replace(/\.[^/.]+$/, "") + (bugEnabled ? '_Proof' : '_Fixed');
-      const bleedAmount = bleedEnabled ? 9.0 : 0; // 0.125" = 9.0pt
+      const activeBleedAmount = bleedEnabled ? bleedAmount : 0;
       
       if (artworkType === 'pdf') {
         // Resolve target pages to stamp
@@ -850,7 +850,7 @@ export default function App() {
           canvasScale,
           pagesToStitch,
           currentPage,
-          bleedAmount, // Pass bleed amount (in points)
+          activeBleedAmount, // Pass bleed amount (in points)
           bugEnabled,  // Pass toggle state
           finalPositions,
           finalSizes,
@@ -868,7 +868,7 @@ export default function App() {
         link.click();
       } else {
         // Image export (pass bleed in pixels)
-        const bleedPx = bleedAmount * canvasScale;
+        const bleedPx = activeBleedAmount * canvasScale;
         const finalImageDataUrl = stitchBugToImage(
           artworkCanvas,
           bugCanvas,
@@ -970,7 +970,7 @@ export default function App() {
                       // Calculate effective dimensions based on current settings
                       const baseBox = trimCropEnabled ? pdfBoxInfo.trimBox : pdfBoxInfo.cropBox;
                       const manualInset = manualCropAmount || 0;
-                      const bleedOffset = bleedEnabled ? 9.0 : 0; // 0.125"
+                      const bleedOffset = bleedEnabled ? bleedAmount : 0;
 
                       let finalTrimW = baseBox.width - (manualInset * 2);
                       let finalTrimH = baseBox.height - (manualInset * 2);
@@ -1007,7 +1007,7 @@ export default function App() {
                           <div className="info-item" style={{ borderLeft: '3px solid #ff007f' }}>
                             <span className="info-label" style={{ color: '#ff007f' }}>Bleed Margin</span>
                             <span className="info-val">
-                              {bleedEnabled ? '0.125" (Included)' : 'None'}
+                              {bleedEnabled ? `${(bleedAmount / 72).toFixed(3)}" (Included)` : 'None'}
                             </span>
                           </div>
                         </>
@@ -1034,6 +1034,7 @@ export default function App() {
                 sourceHasBleed={sourceHasBleed}
                 showSafeLine={showSafeLine}
                 bleedEnabled={bleedEnabled} // Draw actual Magenta Trim Line
+                bleedAmount={bleedAmount}
                 isCropMode={isCropMode}
                 manualCropGuides={manualCropGuides}
                 bugEnabled={bugEnabled}
@@ -1129,6 +1130,8 @@ export default function App() {
                   showSafeLine={showSafeLine}
                   bleedEnabled={bleedEnabled}
                   onBleedToggle={() => setBleedEnabled(!bleedEnabled)}
+                  bleedAmount={bleedAmount}
+                  onBleedAmountChange={setBleedAmount}
                   trimCropEnabled={trimCropEnabled}
                   onTrimCropToggle={() => setTrimCropEnabled(!trimCropEnabled)}
                   manualCropAmount={manualCropAmount}

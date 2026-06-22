@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ShieldCheck, Check, AlignLeft, AlignCenter, AlignRight, RotateCcw } from 'lucide-react';
 
 export default function ControlPanel({
@@ -11,6 +12,8 @@ export default function ControlPanel({
   showSafeLine,      // boolean
   bleedEnabled,      // boolean
   onBleedToggle,     // function
+  bleedAmount,       // number in PDF points
+  onBleedAmountChange,
   bugEnabled,        // boolean
   onBugEnabledToggle,// function
   onQuickAlign,      // function: (alignment: 'left' | 'center' | 'right') => void
@@ -47,6 +50,19 @@ export default function ControlPanel({
 
   const handleCustomColorChange = (e) => {
     onColorSelect(e.target.value);
+  };
+
+  const bleedInches = bleedAmount / 72;
+  const [bleedInput, setBleedInput] = useState(bleedInches.toFixed(3));
+
+  const commitBleedInput = () => {
+    const inches = Number(bleedInput);
+    if (Number.isFinite(inches) && inches > 0) {
+      onBleedAmountChange(inches * 72);
+      setBleedInput(inches.toFixed(3));
+    } else {
+      setBleedInput(bleedInches.toFixed(3));
+    }
   };
 
   return (
@@ -224,7 +240,10 @@ export default function ControlPanel({
         {/* Mirror Bleed Toggle */}
         <div className="toggle-item" style={{ borderLeft: bleedEnabled ? '3px solid var(--accent)' : '1px solid var(--border-color)' }}>
           <div className="toggle-info">
-            <h5 style={{ color: bleedEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Add 0.125" Mirror Bleed</h5>
+            <h5 style={{ color: bleedEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Add Mirror Bleed</h5>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+              {bleedInches.toFixed(3)}" on each edge
+            </p>
           </div>
           <label className="switch">
             <input
@@ -235,6 +254,63 @@ export default function ControlPanel({
             <span className="slider-switch" />
           </label>
         </div>
+
+        {bleedEnabled && (
+          <div style={{
+            marginTop: '8px',
+            padding: '12px',
+            background: 'rgba(168, 85, 247, 0.05)',
+            borderRadius: '8px',
+            border: '1px solid rgba(168, 85, 247, 0.2)'
+          }}>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>
+              Bleed Size (inches)
+            </label>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <input
+                type="number"
+                min="0.001"
+                step="0.001"
+                value={bleedInput}
+                onChange={(e) => {
+                  setBleedInput(e.target.value);
+                  const inches = Number(e.target.value);
+                  if (e.target.value !== '' && Number.isFinite(inches) && inches > 0) {
+                    onBleedAmountChange(inches * 72);
+                  }
+                }}
+                onBlur={commitBleedInput}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitBleedInput();
+                    e.currentTarget.blur();
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '6px',
+                  padding: '7px 8px',
+                  fontSize: '12px',
+                  color: 'var(--text-primary)'
+                }}
+                aria-label="Custom mirror bleed size in inches"
+              />
+              <button
+                className={`btn ${Math.abs(bleedAmount - 9) < 0.001 ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ padding: '7px 10px', fontSize: '11px' }}
+                onClick={() => {
+                  onBleedAmountChange(9);
+                  setBleedInput('0.125');
+                }}
+              >
+                Default 0.125"
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Advanced: Crop to TrimBox Toggle */}
         <div className="toggle-item" style={{ borderLeft: trimCropEnabled ? '3px solid #ff4d4d' : '1px solid var(--border-color)' }}>
