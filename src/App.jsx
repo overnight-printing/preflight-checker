@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { HelpCircle, Shield, FileText, Image as ImageIcon, Sparkles, ClipboardCheck, Sun, Moon, Monitor, UploadCloud } from 'lucide-react';
+import { FileText, Image as ImageIcon, Sparkles, ClipboardCheck, Sun, Moon, Monitor, UploadCloud } from 'lucide-react';
 import UploadZone from './components/UploadZone';
 import EditorCanvas from './components/EditorCanvas';
 import ControlPanel from './components/ControlPanel';
@@ -1020,11 +1020,8 @@ export default function App() {
                 sourceHasBleed={sourceHasBleed}
                 showSafeLine={showSafeLine}
                 bleedEnabled={bleedEnabled} // Draw actual Magenta Trim Line
-                trimCropEnabled={trimCropEnabled} // New prop for non-destructive guide lines
-                manualCropAmount={manualCropAmount} // Pass manual inset for guide alignment
                 isCropMode={isCropMode}
                 manualCropGuides={manualCropGuides}
-                onManualCropGuidesChange={setManualCropGuides}
                 bugEnabled={bugEnabled}
                 zoom={zoom}
                 onZoomChange={setZoom}

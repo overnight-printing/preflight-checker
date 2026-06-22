@@ -11,11 +11,8 @@ export default function EditorCanvas({
   canvasScale = 1.0,
   showSafeLine = true,
   bleedEnabled = false, // Added bleedEnabled to draw the actual Trim Line (Magenta)
-  trimCropEnabled = false,
-  manualCropAmount = 0,
   isCropMode = false,
   manualCropGuides = { top: 0, right: 0, bottom: 0, left: 0 },
-  onManualCropGuidesChange,
   bugEnabled = true, // Toggle to show/hide bug overlay
   zoom = 1.0,       // Zoom scale (0.1 to 3.0)
   onZoomChange,     // callback to update zoom
@@ -122,7 +119,6 @@ export default function EditorCanvas({
         }
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artworkCanvas, artworkFile, pdfBoxInfo, handleFitToHeight]);
 
   // Handle Drag Start
