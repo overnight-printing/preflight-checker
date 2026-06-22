@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 
 export default function EditorCanvas({
@@ -75,25 +75,26 @@ export default function EditorCanvas({
     bottomPadding = 90; // clear floating zoom controls
   }
 
-  // Recalculates zoom to fit the canvas inside the visible viewport area
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const handleFitToHeight = () => {
+  // Recalculate zoom from the actual viewport available to the artwork.
+  const handleFitToHeight = useCallback(() => {
     if (!containerRef.current || !artworkCanvas) return;
     
     const containerWidth = containerRef.current.clientWidth;
     const containerHeight = containerRef.current.clientHeight;
     
-    const visibleWidth = containerWidth - 80;
-    const visibleHeight = containerHeight - topPadding - bottomPadding;
+    const visibleWidth = Math.max(1, containerWidth - 80);
+    const visibleHeight = Math.max(1, containerHeight - topPadding - bottomPadding);
     
-    const zoomX = (visibleWidth - 48) / artworkCanvas.width;
-    const zoomY = (visibleHeight - 48) / artworkCanvas.height;
+    const zoomX = visibleWidth / artworkCanvas.width;
+    const zoomY = visibleHeight / artworkCanvas.height;
     
     const fitZoom = Math.min(1.0, zoomX, zoomY);
-    const finalZoom = Math.max(0.1, Math.round(fitZoom * 10) / 10);
+    // Large-format artwork can require a zoom below 10%. Keep enough precision
+    // that it still fits instead of rounding back up and overflowing the app.
+    const finalZoom = Math.max(0.01, Math.floor(fitZoom * 1000) / 1000);
     
     onZoomChange(finalZoom);
-  };
+  }, [artworkCanvas, bottomPadding, onZoomChange, topPadding]);
 
   const lastFileRef = useRef(null);
   const lastBoxInfoRef = useRef(null);
@@ -112,11 +113,14 @@ export default function EditorCanvas({
       const isBoxInfoLoaded = pdfBoxInfo !== null && lastBoxInfoRef.current === null;
       
       if (isNewFile || isBoxInfoLoaded) {
-        setTimeout(handleFitToHeight, 150);
+        const frameId = requestAnimationFrame(() => {
+          requestAnimationFrame(handleFitToHeight);
+        });
         lastFileRef.current = artworkFile;
         if (pdfBoxInfo) {
           lastBoxInfoRef.current = pdfBoxInfo;
         }
+        return () => cancelAnimationFrame(frameId);
       }
     }
   }, [artworkCanvas, artworkFile, pdfBoxInfo, handleFitToHeight]);
@@ -327,7 +331,7 @@ export default function EditorCanvas({
           zIndex: 20
         }}
       >
-        <button className="zoom-btn" onClick={() => onZoomChange(Math.max(0.1, zoom - 0.1))} title="Zoom Out"><ZoomOut size={16} /></button>
+        <button className="zoom-btn" onClick={() => onZoomChange(Math.max(0.01, zoom - 0.1))} title="Zoom Out"><ZoomOut size={16} /></button>
         <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', minWidth: '45px', textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
         <button className="zoom-btn" onClick={() => onZoomChange(Math.min(3.0, zoom + 0.1))} title="Zoom In"><ZoomIn size={16} /></button>
         <div style={{ width: '1px', height: '16px', background: 'var(--border-color)' }} />

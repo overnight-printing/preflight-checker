@@ -947,7 +947,7 @@ export default function App() {
           /* Editor State */
           <>
             {/* 1. Canvas Area */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+            <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
               {/* PDF Geometry Specification Dashboard (Live Updates) */}
               {pdfBoxInfo && (
                 <div className="pdf-geometry-info-card">
