@@ -935,15 +935,20 @@ export default function App() {
                 <div className="pdf-geometry-info-card">
                   <div className="info-grid">
                     {(() => {
-                      // Calculate effective dimensions based on current settings
-                      const baseBox = trimCropEnabled ? pdfBoxInfo.trimBox : pdfBoxInfo.cropBox;
+                      // Professional PDF page boxes describe the intended
+                      // physical product independently of the render/crop
+                      // controls. Prefer them whenever they are genuinely
+                      // distinct; crop-mark guides are only a fallback for
+                      // files that do not contain a usable TrimBox.
+                      const hasMetadataTrim = pdfBoxInfo.hasDistinctTrimBox;
+                      const hasMetadataBleed = hasMetadataTrim && pdfBoxInfo.hasDistinctBleedBox;
+                      const baseBox = hasMetadataTrim ? pdfBoxInfo.trimBox : pdfBoxInfo.cropBox;
                       const manualInset = manualCropAmount || 0;
-                      const bleedOffset = bleedEnabled ? bleedAmount : 0;
 
                       let finalTrimW = baseBox.width - (manualInset * 2);
                       let finalTrimH = baseBox.height - (manualInset * 2);
 
-                      if (isCropMode && manualCropGuides) {
+                      if (!hasMetadataTrim && isCropMode && manualCropGuides) {
                         const guideLeftPt = manualCropGuides.left / canvasScale;
                         const guideRightPt = manualCropGuides.right / canvasScale;
                         const guideTopPt = manualCropGuides.top / canvasScale;
@@ -955,8 +960,28 @@ export default function App() {
                       finalTrimW = Math.max(1, finalTrimW);
                       finalTrimH = Math.max(1, finalTrimH);
 
-                      const finalCanvasW = finalTrimW + (bleedOffset * 2);
-                      const finalCanvasH = finalTrimH + (bleedOffset * 2);
+                      let finalCanvasW = finalTrimW;
+                      let finalCanvasH = finalTrimH;
+                      let bleedLabel = 'None';
+
+                      if (bleedEnabled) {
+                        finalCanvasW += bleedAmount * 2;
+                        finalCanvasH += bleedAmount * 2;
+                        bleedLabel = `${(bleedAmount / 72).toFixed(3)}" (Added)`;
+                      } else if (hasMetadataBleed) {
+                        const horizontalBleed = pdfBoxInfo.bleedInsets.left + pdfBoxInfo.bleedInsets.right;
+                        const verticalBleed = pdfBoxInfo.bleedInsets.top + pdfBoxInfo.bleedInsets.bottom;
+                        finalCanvasW += horizontalBleed;
+                        finalCanvasH += verticalBleed;
+
+                        const bleedValues = Object.values(pdfBoxInfo.bleedInsets);
+                        const uniformBleed = bleedValues.every(
+                          (value) => Math.abs(value - bleedValues[0]) < 0.01
+                        );
+                        bleedLabel = uniformBleed
+                          ? `${(bleedValues[0] / 72).toFixed(3)}" (Included)`
+                          : 'Variable (Included)';
+                      }
 
                       return (
                         <>
@@ -975,7 +1000,7 @@ export default function App() {
                           <div className="info-item" style={{ borderLeft: '3px solid #ff007f' }}>
                             <span className="info-label" style={{ color: '#ff007f' }}>Bleed Margin</span>
                             <span className="info-val">
-                              {bleedEnabled ? `${(bleedAmount / 72).toFixed(3)}" (Included)` : 'None'}
+                              {bleedLabel}
                             </span>
                           </div>
                         </>

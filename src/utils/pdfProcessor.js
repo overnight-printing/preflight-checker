@@ -49,6 +49,17 @@ export async function getPDFBoxInfo(file, pageNum) {
       top: (cropBox.y + cropBox.height) - (trimBox.y + trimBox.height)
     };
     const hasDistinctTrimBox = Object.values(trimInsets).some((value) => Math.abs(value) > 0.01);
+
+    const bleedInsets = {
+      left: trimBox.x - bleedBox.x,
+      right: (bleedBox.x + bleedBox.width) - (trimBox.x + trimBox.width),
+      bottom: trimBox.y - bleedBox.y,
+      top: (bleedBox.y + bleedBox.height) - (trimBox.y + trimBox.height)
+    };
+    const bleedContainsTrim = Object.values(bleedInsets).every((value) => value >= -0.01);
+    const hasDistinctBleedBox = hasDistinctTrimBox
+      && bleedContainsTrim
+      && Object.values(bleedInsets).some((value) => value > 0.01);
     
     return {
       mediaBox: { x: mediaBox.x, y: mediaBox.y, width: mediaBox.width, height: mediaBox.height },
@@ -56,7 +67,9 @@ export async function getPDFBoxInfo(file, pageNum) {
       trimBox: { x: trimBox.x, y: trimBox.y, width: trimBox.width, height: trimBox.height },
       bleedBox: { x: bleedBox.x, y: bleedBox.y, width: bleedBox.width, height: bleedBox.height },
       hasDistinctTrimBox,
-      trimInsets
+      trimInsets,
+      hasDistinctBleedBox,
+      bleedInsets
     };
   } catch (error) {
     console.error('Error in getPDFBoxInfo:', error);
