@@ -1,8 +1,10 @@
 .app-container {
   display: flex;
   flex-direction: column;
+  width: 100vw;
   height: 100vh;
   max-height: 100vh;
+  overflow: hidden;
   background: radial-gradient(circle at top right, rgba(40, 51, 119, 0.15), transparent 40%),
               radial-gradient(circle at bottom left, rgba(137, 197, 232, 0.15), transparent 45%);
 }
@@ -54,6 +56,8 @@
   display: flex;
   flex: 1;
   overflow: hidden;
+  min-width: 0;
+  min-height: 0;
   height: calc(100vh - 65px);
 }
 
@@ -146,6 +150,9 @@
 /* Draggable Canvas Workspace */
 .canvas-workspace {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   background: var(--bg-canvas-workspace);
@@ -261,6 +268,7 @@
 .control-sidebar {
   width: 360px;
   min-width: 360px;
+  max-height: 100%;
   background: var(--bg-surface);
   backdrop-filter: blur(20px);
   border-left: 1px solid var(--border-color);

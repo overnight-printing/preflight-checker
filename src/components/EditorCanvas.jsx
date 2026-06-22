@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 
 export default function EditorCanvas({
@@ -12,6 +12,8 @@ export default function EditorCanvas({
   showSafeLine = true,
   bleedEnabled = false, // Added bleedEnabled to draw the actual Trim Line (Magenta)
   bleedAmount = 9.0,    // Added mirror bleed in PDF points
+  trimCropEnabled = false,
+  manualCropAmount = 0,
   isCropMode = false,
   manualCropGuides = { top: 0, right: 0, bottom: 0, left: 0 },
   bugEnabled = true, // Toggle to show/hide bug overlay
@@ -43,14 +45,27 @@ export default function EditorCanvas({
   // If virtual mirror bleed is enabled, inset the artwork by the selected bleed.
   const virtualBleedPx = bleedEnabled ? (bleedAmount * canvasScale) : 0;
   
-  // Apply manual crop guides if crop mode is active
-  const cropLeftPx = isCropMode && manualCropGuides ? manualCropGuides.left : 0;
-  const cropTopPx = isCropMode && manualCropGuides ? manualCropGuides.top : 0;
-  const cropRightPx = isCropMode && manualCropGuides ? manualCropGuides.right : 0;
-  const cropBottomPx = isCropMode && manualCropGuides ? manualCropGuides.bottom : 0;
+  const hasMetadataTrim = Boolean(pdfBoxInfo?.hasDistinctTrimBox && !trimCropEnabled);
+  const metadataLeftPx = hasMetadataTrim
+    ? Math.max(0, (pdfBoxInfo.trimInsets.left - manualCropAmount) * canvasScale)
+    : 0;
+  const metadataRightPx = hasMetadataTrim
+    ? Math.max(0, (pdfBoxInfo.trimInsets.right - manualCropAmount) * canvasScale)
+    : 0;
+  const metadataTopPx = hasMetadataTrim
+    ? Math.max(0, (pdfBoxInfo.trimInsets.top - manualCropAmount) * canvasScale)
+    : 0;
+  const metadataBottomPx = hasMetadataTrim
+    ? Math.max(0, (pdfBoxInfo.trimInsets.bottom - manualCropAmount) * canvasScale)
+    : 0;
 
-  // The Trim Line (Blue/Magenta) always marks the boundary between the artwork and the added bleed.
-  // It shrinks inward if manual crop guides are active.
+  // Visual crop guides override metadata because they represent the user's
+  // chosen physical cut line. The current canvas is not cropped a second time.
+  const cropLeftPx = isCropMode ? manualCropGuides.left : metadataLeftPx;
+  const cropTopPx = isCropMode ? manualCropGuides.top : metadataTopPx;
+  const cropRightPx = isCropMode ? manualCropGuides.right : metadataRightPx;
+  const cropBottomPx = isCropMode ? manualCropGuides.bottom : metadataBottomPx;
+
   const trimLeftPx = virtualBleedPx + cropLeftPx;
   const trimTopPx = virtualBleedPx + cropTopPx;
   const trimWidthPx = Math.max(0, canvasWidth - (virtualBleedPx * 2) - cropLeftPx - cropRightPx);
@@ -76,25 +91,26 @@ export default function EditorCanvas({
     bottomPadding = 90; // clear floating zoom controls
   }
 
-  // Recalculates zoom to fit the canvas inside the visible viewport area
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const handleFitToHeight = () => {
+  // Recalculate zoom from the actual viewport available to the artwork.
+  const handleFitToHeight = useCallback(() => {
     if (!containerRef.current || !artworkCanvas) return;
     
     const containerWidth = containerRef.current.clientWidth;
     const containerHeight = containerRef.current.clientHeight;
     
-    const visibleWidth = containerWidth - 80;
-    const visibleHeight = containerHeight - topPadding - bottomPadding;
+    const visibleWidth = Math.max(1, containerWidth - 80);
+    const visibleHeight = Math.max(1, containerHeight - topPadding - bottomPadding);
     
-    const zoomX = (visibleWidth - 48) / artworkCanvas.width;
-    const zoomY = (visibleHeight - 48) / artworkCanvas.height;
+    const zoomX = visibleWidth / artworkCanvas.width;
+    const zoomY = visibleHeight / artworkCanvas.height;
     
     const fitZoom = Math.min(1.0, zoomX, zoomY);
-    const finalZoom = Math.max(0.1, Math.round(fitZoom * 10) / 10);
+    // Large-format artwork can require a zoom below 10%. Keep enough precision
+    // that it still fits instead of rounding back up and overflowing the app.
+    const finalZoom = Math.max(0.01, Math.floor(fitZoom * 1000) / 1000);
     
     onZoomChange(finalZoom);
-  };
+  }, [artworkCanvas, bottomPadding, onZoomChange, topPadding]);
 
   const lastFileRef = useRef(null);
   const lastBoxInfoRef = useRef(null);
@@ -113,11 +129,14 @@ export default function EditorCanvas({
       const isBoxInfoLoaded = pdfBoxInfo !== null && lastBoxInfoRef.current === null;
       
       if (isNewFile || isBoxInfoLoaded) {
-        setTimeout(handleFitToHeight, 150);
+        const frameId = requestAnimationFrame(() => {
+          requestAnimationFrame(handleFitToHeight);
+        });
         lastFileRef.current = artworkFile;
         if (pdfBoxInfo) {
           lastBoxInfoRef.current = pdfBoxInfo;
         }
+        return () => cancelAnimationFrame(frameId);
       }
     }
   }, [artworkCanvas, artworkFile, pdfBoxInfo, handleFitToHeight]);
@@ -328,7 +347,7 @@ export default function EditorCanvas({
           zIndex: 20
         }}
       >
-        <button className="zoom-btn" onClick={() => onZoomChange(Math.max(0.1, zoom - 0.1))} title="Zoom Out"><ZoomOut size={16} /></button>
+        <button className="zoom-btn" onClick={() => onZoomChange(Math.max(0.01, zoom - 0.1))} title="Zoom Out"><ZoomOut size={16} /></button>
         <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', minWidth: '45px', textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
         <button className="zoom-btn" onClick={() => onZoomChange(Math.min(3.0, zoom + 0.1))} title="Zoom In"><ZoomIn size={16} /></button>
         <div style={{ width: '1px', height: '16px', background: 'var(--border-color)' }} />
