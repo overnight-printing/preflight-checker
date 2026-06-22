@@ -407,7 +407,7 @@ export default function App() {
       const canvas = document.createElement('canvas');
       
       // Render to canvas with bleed parameters (0.125" = 9.0pt) and optional trim/manual crop
-      await renderPDFPageToCanvas(page, canvas, canvasScale, bleedAmount, trimCrop, boxInfo, manualCrop, isCropMode, manualCropGuides);
+      await renderPDFPageToCanvas(page, canvas, canvasScale, bleedAmount, trimCrop, boxInfo, manualCrop);
       setArtworkCanvas(canvas);
 
       // Extract geometry metadata if we have the file
@@ -667,86 +667,54 @@ export default function App() {
   const handleQuickAlign = useCallback((alignment) => {
     if (!artworkCanvas || !bugSize) return;
 
-    if (pdfBoxInfo && pdfBoxInfo.trimBox && pdfBoxInfo.cropBox) {
-      // PDF contains professional crop marks and predefined TrimBox/CropBox geometry.
-      // We align specifically based on the actual TrimBox, not the extra border margin.
-      const { trimBox, cropBox } = pdfBoxInfo;
-      
-      // If virtual mirror bleed is enabled, the canvas coordinates are offset by 9pt on all edges.
-      const virtualBleedOffset = bleedEnabled ? 9.0 : 0.0;
-      
-      // Calculate coordinates relative to CropBox (offsetting for virtual bleed if active)
-      const trimLeft = (trimBox.x - cropBox.x) + virtualBleedOffset;
-      const trimWidth = trimBox.width;
-      const trimHeight = trimBox.height;
-      const trimTop = (cropBox.height - (trimBox.y - cropBox.y + trimHeight)) + virtualBleedOffset;
+    const virtualBleedPx = (bleedEnabled ? 9.0 : 0) * canvasScale;
+    const metadataInsets = pdfBoxInfo?.hasDistinctTrimBox && !trimCropEnabled
+      ? {
+          left: Math.max(0, (pdfBoxInfo.trimInsets.left - manualCropAmount) * canvasScale),
+          right: Math.max(0, (pdfBoxInfo.trimInsets.right - manualCropAmount) * canvasScale),
+          top: Math.max(0, (pdfBoxInfo.trimInsets.top - manualCropAmount) * canvasScale),
+          bottom: Math.max(0, (pdfBoxInfo.trimInsets.bottom - manualCropAmount) * canvasScale)
+        }
+      : { left: 0, right: 0, top: 0, bottom: 0 };
+    const cropInsets = isCropMode ? manualCropGuides : metadataInsets;
+    const safeInsetPx = 9.0 * canvasScale;
+    const safeLeftPx = virtualBleedPx + cropInsets.left + safeInsetPx;
+    const safeTopPx = virtualBleedPx + cropInsets.top + safeInsetPx;
+    const safeWidthPx = Math.max(
+      0,
+      artworkCanvas.width - (virtualBleedPx * 2) - cropInsets.left - cropInsets.right - (safeInsetPx * 2)
+    );
+    const safeHeightPx = Math.max(
+      0,
+      artworkCanvas.height - (virtualBleedPx * 2) - cropInsets.top - cropInsets.bottom - (safeInsetPx * 2)
+    );
 
-      // Safe area = 9pt (0.125") inside the active TrimBox
-      const safeLeft = trimLeft + 9.0;
-      const safeWidth = trimWidth - 18.0;
-      const safeHeight = trimHeight - 18.0;
-      const safeTop = trimTop + 9.0;
+    let left = 100;
+    if (alignment === 'left') {
+      left = safeLeftPx;
+    } else if (alignment === 'center') {
+      left = safeLeftPx + (safeWidthPx / 2) - (bugSize.width / 2);
+    } else if (alignment === 'right') {
+      left = safeLeftPx + safeWidthPx - bugSize.width;
+    }
 
-      // Map PDF points to canvas pixels
-      const safeLeftPx = safeLeft * canvasScale;
-      const safeWidthPx = safeWidth * canvasScale;
-      const safeHeightPx = safeHeight * canvasScale;
-      const safeTopPx = safeTop * canvasScale;
-
-      let left = 100;
-      if (alignment === 'left') {
-        left = safeLeftPx;
-      } else if (alignment === 'center') {
-        left = safeLeftPx + (safeWidthPx / 2) - (bugSize.width / 2);
-      } else if (alignment === 'right') {
-        left = safeLeftPx + safeWidthPx - bugSize.width;
-      }
-
-      setBugPosition((prev) => {
-        const defaultTop = safeTopPx + safeHeightPx - bugSize.height;
-        const useDefault = !hasDoneInitialAlignment || !prev || (prev.left === 100 && prev.top === 100);
-        const top = useDefault ? defaultTop : prev.top;
-        const nextPos = { left, top };
-        setPagePositions(p => ({ ...p, [currentPage]: nextPos }));
-        return nextPos;
-      });
-      setPageSizes(s => ({ ...s, [currentPage]: bugSize }));
-      if (alignment !== 'custom') {
-        setPageAlignments(a => ({ ...a, [currentPage]: alignment }));
-      }
-    } else {
-      // Fallback for images or PDFs that do not contain a defined TrimBox.
-      // We align relative to the canvas outer edges, accounting for optionally added bleed padding.
-      const bleedPadding = (sourceHasBleed ? 9.0 : 0.0) + (bleedEnabled ? 9.0 : 0.0);
-      const activeSafeMargin = (bleedPadding + 9.0) * canvasScale;
-
-      let left = 100;
-      if (alignment === 'left') {
-        left = activeSafeMargin;
-      } else if (alignment === 'center') {
-        left = (artworkCanvas.width / 2) - (bugSize.width / 2);
-      } else if (alignment === 'right') {
-        left = artworkCanvas.width - activeSafeMargin - bugSize.width;
-      }
-
-      setBugPosition((prev) => {
-        const defaultTop = artworkCanvas.height - activeSafeMargin - bugSize.height;
-        const useDefault = !hasDoneInitialAlignment || !prev || (prev.left === 100 && prev.top === 100);
-        const top = useDefault ? defaultTop : prev.top;
-        const nextPos = { left, top };
-        setPagePositions(p => ({ ...p, [currentPage]: nextPos }));
-        return nextPos;
-      });
-      setPageSizes(s => ({ ...s, [currentPage]: bugSize }));
-      if (alignment !== 'custom') {
-        setPageAlignments(a => ({ ...a, [currentPage]: alignment }));
-      }
+    setBugPosition((prev) => {
+      const defaultTop = safeTopPx + safeHeightPx - bugSize.height;
+      const useDefault = !hasDoneInitialAlignment || !prev || (prev.left === 100 && prev.top === 100);
+      const top = useDefault ? defaultTop : prev.top;
+      const nextPos = { left, top };
+      setPagePositions(p => ({ ...p, [currentPage]: nextPos }));
+      return nextPos;
+    });
+    setPageSizes(s => ({ ...s, [currentPage]: bugSize }));
+    if (alignment !== 'custom') {
+      setPageAlignments(a => ({ ...a, [currentPage]: alignment }));
     }
 
     if (alignment !== 'custom') {
       setCurrentAlignment(alignment);
     }
-  }, [artworkCanvas, bugSize, bleedEnabled, sourceHasBleed, canvasScale, hasDoneInitialAlignment, pdfBoxInfo, currentPage]);
+  }, [artworkCanvas, bugSize, bleedEnabled, canvasScale, hasDoneInitialAlignment, pdfBoxInfo, currentPage, trimCropEnabled, manualCropAmount, isCropMode, manualCropGuides]);
 
   // Automatically align bug if alignment mode is active (not custom)
   useEffect(() => {
@@ -1034,6 +1002,8 @@ export default function App() {
                 sourceHasBleed={sourceHasBleed}
                 showSafeLine={showSafeLine}
                 bleedEnabled={bleedEnabled} // Draw actual Magenta Trim Line
+                trimCropEnabled={trimCropEnabled}
+                manualCropAmount={manualCropAmount}
                 isCropMode={isCropMode}
                 manualCropGuides={manualCropGuides}
                 bugEnabled={bugEnabled}
