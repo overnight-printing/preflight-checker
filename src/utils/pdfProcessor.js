@@ -38,12 +38,25 @@ export async function getPDFBoxInfo(file, pageNum) {
     const cropBox = page.getCropBox() || mediaBox;
     const trimBox = page.getTrimBox() || cropBox;
     const bleedBox = page.getBleedBox() || cropBox;
+
+    // pdf-lib's getTrimBox() falls back to CropBox when TrimBox metadata is
+    // missing. Preserve whether the returned box is actually useful as a cut
+    // line instead of treating every PDF as if it had professional trim data.
+    const trimInsets = {
+      left: trimBox.x - cropBox.x,
+      right: (cropBox.x + cropBox.width) - (trimBox.x + trimBox.width),
+      bottom: trimBox.y - cropBox.y,
+      top: (cropBox.y + cropBox.height) - (trimBox.y + trimBox.height)
+    };
+    const hasDistinctTrimBox = Object.values(trimInsets).some((value) => Math.abs(value) > 0.01);
     
     return {
       mediaBox: { x: mediaBox.x, y: mediaBox.y, width: mediaBox.width, height: mediaBox.height },
       cropBox: { x: cropBox.x, y: cropBox.y, width: cropBox.width, height: cropBox.height },
       trimBox: { x: trimBox.x, y: trimBox.y, width: trimBox.width, height: trimBox.height },
-      bleedBox: { x: bleedBox.x, y: bleedBox.y, width: bleedBox.width, height: bleedBox.height }
+      bleedBox: { x: bleedBox.x, y: bleedBox.y, width: bleedBox.width, height: bleedBox.height },
+      hasDistinctTrimBox,
+      trimInsets
     };
   } catch (error) {
     console.error('Error in getPDFBoxInfo:', error);
@@ -215,11 +228,9 @@ export function drawMirrorBleed(ctx, orig, W, H, B) {
  * @param {boolean} trimCropEnabled - If true, crops the render to the TrimBox
  * @param {Object} pdfBoxInfo - Box dimensions for the page
  * @param {number} manualCropAmount - Manual inset in PDF points
- * @param {boolean} isCropMode - If true, visual crop mode is active
- * @param {Object} manualCropGuides - Pixels from edges {top, right, bottom, left}
  * @returns {Promise<{width: number, height: number}>}
  */
-export async function renderPDFPageToCanvas(page, canvas, scale = 1.5, bleedAmount = 0, trimCropEnabled = false, pdfBoxInfo = null, manualCropAmount = 0, isCropMode = false, manualCropGuides = null) {
+export async function renderPDFPageToCanvas(page, canvas, scale = 1.5, bleedAmount = 0, trimCropEnabled = false, pdfBoxInfo = null, manualCropAmount = 0) {
   const viewport = page.getViewport({ scale });
   
   let originalWidth = viewport.width;
@@ -245,14 +256,6 @@ export async function renderPDFPageToCanvas(page, canvas, scale = 1.5, bleedAmou
     originalHeight -= manualOffsetPx * 2;
     offsetX += manualOffsetPx;
     offsetY += manualOffsetPx;
-  }
-
-  // Apply interactive visual crop guides
-  if (isCropMode && manualCropGuides) {
-    originalWidth -= (manualCropGuides.left + manualCropGuides.right);
-    originalHeight -= (manualCropGuides.top + manualCropGuides.bottom);
-    offsetX += manualCropGuides.left;
-    offsetY += manualCropGuides.top;
   }
 
   // Prevent negative or zero dimensions
@@ -717,8 +720,10 @@ export function autoDetectCropMarks(canvas) {
     const imgData = ctx.getImageData(0, 0, W, H);
     const data = imgData.data;
 
-    const threshold = 150; // Brightness < 150 is considered dark
-    const minLineLength = 30; // Minimum pixels to be considered a crop mark line
+    const threshold = 185;
+    const edgeBandX = Math.max(8, Math.floor(W * 0.18));
+    const edgeBandY = Math.max(8, Math.floor(H * 0.18));
+    const minRun = Math.max(8, Math.round(Math.min(W, H) * 0.012));
 
     const getPixel = (x, y) => {
       if (x < 0 || x >= W || y < 0 || y >= H) return 255;
@@ -729,98 +734,78 @@ export function autoDetectCropMarks(canvas) {
 
     const isDark = (x, y) => getPixel(x, y) < threshold;
 
-    const searchX = Math.floor(W * 0.15);
-    const searchY = Math.floor(H * 0.15);
-
-    let leftInset = 0;
-    let rightInset = 0;
-    let topInset = 0;
-    let bottomInset = 0;
-
-    // Helper: find longest vertical line in a bounding box
-    const findVerticalLine = (startX, endX, startY, endY, directionX) => {
-      let bestX = -1;
-      let maxLen = 0;
-      const stepX = directionX > 0 ? 1 : -1;
-      
-      for (let x = startX; directionX > 0 ? x <= endX : x >= endX; x += stepX) {
-        let currentLen = 0;
-        let localMax = 0;
-        for (let y = startY; y <= endY; y++) {
-          if (isDark(x, y)) {
-            currentLen++;
-            if (currentLen > localMax) localMax = currentLen;
-          } else {
-            currentLen = 0;
-          }
-        }
-        if (localMax >= minLineLength && localMax > maxLen) {
-          maxLen = localMax;
-          bestX = x;
-          // We found the outermost line, so we can stop searching deeper? 
-          // Actually, we want the outermost line. Since we start from edge, the first good match is usually it.
-          if (maxLen > minLineLength * 1.5) return bestX;
+    const longestHorizontalRunEndingAt = (y, fromX, toX, step) => {
+      let run = 0;
+      let best = null;
+      for (let x = fromX; step > 0 ? x <= toX : x >= toX; x += step) {
+        if (isDark(x, y)) {
+          run++;
+          if (run >= minRun) best = x;
+        } else if (run > 1) {
+          break;
         }
       }
-      return bestX;
+      return best;
     };
 
-    // Helper: find longest horizontal line in a bounding box
-    const findHorizontalLine = (startX, endX, startY, endY, directionY) => {
-      let bestY = -1;
-      let maxLen = 0;
-      const stepY = directionY > 0 ? 1 : -1;
-
-      for (let y = startY; directionY > 0 ? y <= endY : y >= endY; y += stepY) {
-        let currentLen = 0;
-        let localMax = 0;
-        for (let x = startX; x <= endX; x++) {
-          if (isDark(x, y)) {
-            currentLen++;
-            if (currentLen > localMax) localMax = currentLen;
-          } else {
-            currentLen = 0;
-          }
-        }
-        if (localMax >= minLineLength && localMax > maxLen) {
-          maxLen = localMax;
-          bestY = y;
-          if (maxLen > minLineLength * 1.5) return bestY;
+    const longestVerticalRunEndingAt = (x, fromY, toY, step) => {
+      let run = 0;
+      let best = null;
+      for (let y = fromY; step > 0 ? y <= toY : y >= toY; y += step) {
+        if (isDark(x, y)) {
+          run++;
+          if (run >= minRun) best = y;
+        } else if (run > 1) {
+          break;
         }
       }
-      return bestY;
+      return best;
     };
 
-    // 1. Left Inset (Scan vertical lines from left edge inward, checking top-left quadrant)
-    const leftX = findVerticalLine(0, searchX, 0, searchY, 1);
-    if (leftX !== -1) leftInset = leftX;
+    const median = (values) => {
+      if (!values.length) return null;
+      const sorted = [...values].sort((a, b) => a - b);
+      return sorted[Math.floor(sorted.length / 2)];
+    };
 
-    // 2. Right Inset (Scan vertical lines from right edge inward, checking top-right quadrant)
-    const rightX = findVerticalLine(W - 1, W - searchX, 0, searchY, -1);
-    if (rightX !== -1) rightInset = (W - 1) - rightX;
-
-    // 3. Top Inset (Scan horizontal lines from top edge inward, checking top-left quadrant)
-    const topY = findHorizontalLine(0, searchX, 0, searchY, 1);
-    if (topY !== -1) topInset = topY;
-
-    // 4. Bottom Inset (Scan horizontal lines from bottom edge inward, checking bottom-left quadrant)
-    const bottomY = findHorizontalLine(0, searchX, H - 1, H - searchY, -1);
-    if (bottomY !== -1) bottomInset = (H - 1) - bottomY;
-
-    // If we didn't find at least one valid line, return null
-    if (leftInset === 0 && rightInset === 0 && topInset === 0 && bottomInset === 0) {
-      return null;
+    // Standard crop marks are intentionally perpendicular to the edge they
+    // define: horizontal marks terminate at left/right trim, vertical marks
+    // terminate at top/bottom trim.
+    const leftCandidates = [];
+    const rightCandidates = [];
+    for (let y = 0; y < H; y++) {
+      if (y > edgeBandY && y < H - edgeBandY) continue;
+      const left = longestHorizontalRunEndingAt(y, 0, edgeBandX, 1);
+      const right = longestHorizontalRunEndingAt(y, W - 1, W - 1 - edgeBandX, -1);
+      if (left !== null && left > 0) leftCandidates.push(left);
+      if (right !== null && right < W - 1) rightCandidates.push((W - 1) - right);
     }
 
+    const topCandidates = [];
+    const bottomCandidates = [];
+    for (let x = 0; x < W; x++) {
+      if (x > edgeBandX && x < W - edgeBandX) continue;
+      const top = longestVerticalRunEndingAt(x, 0, edgeBandY, 1);
+      const bottom = longestVerticalRunEndingAt(x, H - 1, H - 1 - edgeBandY, -1);
+      if (top !== null && top > 0) topCandidates.push(top);
+      if (bottom !== null && bottom < H - 1) bottomCandidates.push((H - 1) - bottom);
+    }
+
+    const left = median(leftCandidates);
+    const right = median(rightCandidates);
+    const top = median(topCandidates);
+    const bottom = median(bottomCandidates);
+    const foundSides = [left, right, top, bottom].filter((value) => value !== null).length;
+    if (foundSides < 2) return null;
+
     return {
-      top: topInset > 0 ? topInset : 0,
-      right: rightInset > 0 ? rightInset : 0,
-      bottom: bottomInset > 0 ? bottomInset : 0,
-      left: leftInset > 0 ? leftInset : 0
+      top: top ?? 0,
+      right: right ?? 0,
+      bottom: bottom ?? 0,
+      left: left ?? 0
     };
   } catch (error) {
     console.error('Auto-Detect Crop Marks Failed:', error);
     return null;
   }
 }
-

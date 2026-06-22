@@ -11,6 +11,8 @@ export default function EditorCanvas({
   canvasScale = 1.0,
   showSafeLine = true,
   bleedEnabled = false, // Added bleedEnabled to draw the actual Trim Line (Magenta)
+  trimCropEnabled = false,
+  manualCropAmount = 0,
   isCropMode = false,
   manualCropGuides = { top: 0, right: 0, bottom: 0, left: 0 },
   bugEnabled = true, // Toggle to show/hide bug overlay
@@ -42,14 +44,27 @@ export default function EditorCanvas({
   // If virtual mirror bleed is enabled, the artwork content is inset by 9pt (0.125").
   const virtualBleedPx = bleedEnabled ? (9.0 * canvasScale) : 0;
   
-  // Apply manual crop guides if crop mode is active
-  const cropLeftPx = isCropMode && manualCropGuides ? manualCropGuides.left : 0;
-  const cropTopPx = isCropMode && manualCropGuides ? manualCropGuides.top : 0;
-  const cropRightPx = isCropMode && manualCropGuides ? manualCropGuides.right : 0;
-  const cropBottomPx = isCropMode && manualCropGuides ? manualCropGuides.bottom : 0;
+  const hasMetadataTrim = Boolean(pdfBoxInfo?.hasDistinctTrimBox && !trimCropEnabled);
+  const metadataLeftPx = hasMetadataTrim
+    ? Math.max(0, (pdfBoxInfo.trimInsets.left - manualCropAmount) * canvasScale)
+    : 0;
+  const metadataRightPx = hasMetadataTrim
+    ? Math.max(0, (pdfBoxInfo.trimInsets.right - manualCropAmount) * canvasScale)
+    : 0;
+  const metadataTopPx = hasMetadataTrim
+    ? Math.max(0, (pdfBoxInfo.trimInsets.top - manualCropAmount) * canvasScale)
+    : 0;
+  const metadataBottomPx = hasMetadataTrim
+    ? Math.max(0, (pdfBoxInfo.trimInsets.bottom - manualCropAmount) * canvasScale)
+    : 0;
 
-  // The Trim Line (Blue/Magenta) always marks the boundary between the artwork and the added bleed.
-  // It shrinks inward if manual crop guides are active.
+  // Visual crop guides override metadata because they represent the user's
+  // chosen physical cut line. The current canvas is not cropped a second time.
+  const cropLeftPx = isCropMode ? manualCropGuides.left : metadataLeftPx;
+  const cropTopPx = isCropMode ? manualCropGuides.top : metadataTopPx;
+  const cropRightPx = isCropMode ? manualCropGuides.right : metadataRightPx;
+  const cropBottomPx = isCropMode ? manualCropGuides.bottom : metadataBottomPx;
+
   const trimLeftPx = virtualBleedPx + cropLeftPx;
   const trimTopPx = virtualBleedPx + cropTopPx;
   const trimWidthPx = Math.max(0, canvasWidth - (virtualBleedPx * 2) - cropLeftPx - cropRightPx);
