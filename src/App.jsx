@@ -212,13 +212,27 @@ export default function App() {
     loadDefaultBug();
   }, []);
 
+  const resetUnionBugSettings = useCallback(() => {
+    setBugEnabled(false);
+    setBugPosition({ left: 100, top: 100 });
+    setBugScale(100);
+    setColorMode('auto');
+    setSelectedColor('#000000');
+    setRecommendedColor('#000000');
+    setCurrentAlignment('right');
+    setPagePositions({});
+    setPageSizes({});
+    setPageAlignments({});
+    setMultiPageOptions({ applyTo: 'current' });
+    setHasDoneInitialAlignment(false);
+  }, []);
+
   // 1. Handle Artwork File Upload
   const handleArtworkSelect = useCallback(async (file) => {
     setIsLoading(true);
+    resetUnionBugSettings();
     setArtworkFile(file);
     setOriginalFile(file); // Store initial upload as backup
-    setCurrentAlignment('right'); // Reset to default right alignment on new artwork
-    setHasDoneInitialAlignment(false); // Reset initial alignment flag to trigger bottom placement on canvas load
     setOriginalImage(null);
     setPdfBoxInfo(null);
     setPreflightResults(null);
@@ -249,7 +263,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [resetUnionBugSettings]);
 
   // Handle Theme Switching (Light / Dark / System)
   useEffect(() => {
@@ -1135,7 +1149,7 @@ export default function App() {
                   onScaleChange={setBugScale}
                   onShowSafeLineToggle={() => setShowSafeLine(!showSafeLine)}
                   onMultiPageOptionsChange={setMultiPageOptions}
-                  onReset={handleResetArtwork}
+                  onResetBug={resetUnionBugSettings}
                   isExporting={isExporting}
                 />
               ) : (

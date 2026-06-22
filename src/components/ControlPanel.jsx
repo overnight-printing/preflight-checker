@@ -1,4 +1,4 @@
-import { ShieldCheck, Check, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
+import { ShieldCheck, Check, AlignLeft, AlignCenter, AlignRight, RotateCcw } from 'lucide-react';
 
 export default function ControlPanel({
   colorMode,         // 'auto', 'black', 'white', 'custom'
@@ -31,7 +31,7 @@ export default function ControlPanel({
   onManualCropGuidesChange,
   onAutoDetectCropMarks,
   isAutoDetecting,
-  onReset
+  onResetBug
 }) {
 
   const getBugInchDimensions = () => {
@@ -57,11 +57,12 @@ export default function ControlPanel({
           <span className="section-title" style={{ marginBottom: 0 }}>Enable Union Bug</span>
           <button 
             className="btn btn-secondary" 
-            style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', borderStyle: 'dashed' }}
-            onClick={onReset}
-            title="Reset to original artwork"
+            style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', borderStyle: 'dashed', display: 'flex', alignItems: 'center', gap: '5px' }}
+            onClick={onResetBug}
+            title="Reset all Union Bug settings"
           >
-            🔄 Reset Artwork
+            <RotateCcw size={12} />
+            Reset Union Bug
           </button>
         </div>
         <div className="toggle-item" style={{ borderLeft: bugEnabled ? '3px solid var(--primary)' : '1px solid var(--border-color)' }}>
