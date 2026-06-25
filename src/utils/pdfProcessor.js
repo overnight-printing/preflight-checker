@@ -231,6 +231,15 @@ export function drawMirrorBleed(ctx, orig, W, H, B) {
   ctx.restore();
 }
 
+function canvasRectToPdfRect(position, size, canvasScale, pdfHeight, originX = 0, originY = 0) {
+  return {
+    x: originX + (position.left / canvasScale),
+    y: originY + pdfHeight - ((position.top + size.height) / canvasScale),
+    width: size.width / canvasScale,
+    height: size.height / canvasScale
+  };
+}
+
 /**
  * Renders a PDF page to a target HTML5 Canvas, applying Mirror Bleed if needed.
  * 
@@ -508,18 +517,14 @@ export async function stitchBugToPDF(
         const activePos = pagePositions[pageNum] || position;
         const activeSize = pageSizes[pageNum] || bugSize;
         
-        // Translate canvas pixels to PDF points, shifting by the active box origin to align with viewport
-        const pdfX = cropX + (activePos.left / canvasScale);
-        const pdfY = cropY + cropH - ((activePos.top + activeSize.height) / canvasScale);
-        const pdfW = activeSize.width / canvasScale;
-        const pdfH = activeSize.height / canvasScale;
+        const bugRect = canvasRectToPdfRect(activePos, activeSize, canvasScale, cropH, cropX, cropY);
         
         // Render 100% crisp vector page
         page.drawPage(embeddedBugPage, {
-          x: pdfX,
-          y: pdfY,
-          width: pdfW,
-          height: pdfH
+          x: bugRect.x,
+          y: bugRect.y,
+          width: bugRect.width,
+          height: bugRect.height
         });
       }
     }
@@ -646,17 +651,13 @@ export async function stitchBugToPDF(
     if (bugEnabled && embeddedBugPageForOutput && pagesToStitch.includes(pageNum)) {
       const activePos = pagePositions[pageNum] || position;
       const activeSize = pageSizes[pageNum] || bugSize;
-      
-      const pdfX = activePos.left / canvasScale;
-      const pdfY = newHeight - ((activePos.top + activeSize.height) / canvasScale);
-      const pdfW = activeSize.width / canvasScale;
-      const pdfH = activeSize.height / canvasScale;
+      const bugRect = canvasRectToPdfRect(activePos, activeSize, canvasScale, newHeight);
       
       newPage.drawPage(embeddedBugPageForOutput, {
-        x: pdfX,
-        y: pdfY,
-        width: pdfW,
-        height: pdfH
+        x: bugRect.x,
+        y: bugRect.y,
+        width: bugRect.width,
+        height: bugRect.height
       });
     }
   }
