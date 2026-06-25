@@ -17,6 +17,9 @@ export default function EditorCanvas({
   isCropMode = false,
   manualCropGuides = { top: 0, right: 0, bottom: 0, left: 0 },
   bugEnabled = true, // Toggle to show/hide bug overlay
+  showGrid = false,
+  snapToGrid = false,
+  gridSize = 0.125,
   zoom = 1.0,       // Zoom scale (0.1 to 3.0)
   onZoomChange,     // callback to update zoom
   onPositionChange,
@@ -81,6 +84,12 @@ export default function EditorCanvas({
   // Sizing limits in canvas pixels: 0.2 inches (min) to 2.0 inches (max)
   const minWidthPx = 0.2 * 72 * canvasScale;
   const maxWidthPx = 2.0 * 72 * canvasScale;
+  const gridSizePx = Math.max(1, gridSize * 72 * canvasScale);
+
+  const snapValueToGrid = useCallback((value) => {
+    if (!snapToGrid) return value;
+    return Math.round(value / gridSizePx) * gridSizePx;
+  }, [gridSizePx, snapToGrid]);
 
   // Compute dynamic top/bottom paddings for layout and zoom calculations
   const topPadding = pdfBoxInfo ? 130 : 40;
@@ -176,6 +185,8 @@ export default function EditorCanvas({
       if (isDragging) {
         let newLeft = bugStartPos.left + deltaX;
         let newTop = bugStartPos.top + deltaY;
+        newLeft = snapValueToGrid(newLeft);
+        newTop = snapValueToGrid(newTop);
         newLeft = Math.max(0, Math.min(newLeft, canvasWidth - size.width));
         newTop = Math.max(0, Math.min(newTop, canvasHeight - size.height));
         onPositionChange({ left: newLeft, top: newTop });
@@ -209,7 +220,7 @@ export default function EditorCanvas({
       window.removeEventListener('touchmove', handleMove);
       window.removeEventListener('touchend', handleEnd);
     };
-  }, [isDragging, isResizing, dragStart, bugStartPos, bugStartSize, aspectRatio, canvasWidth, canvasHeight, size, position, zoom, minWidthPx, maxWidthPx, onPositionChange, onSizeChange, onDragEnd]);
+  }, [isDragging, isResizing, dragStart, bugStartPos, bugStartSize, aspectRatio, canvasWidth, canvasHeight, size, position, zoom, minWidthPx, maxWidthPx, snapValueToGrid, onPositionChange, onSizeChange, onDragEnd]);
 
   // Mount artwork canvas into the view
   useEffect(() => {
@@ -260,6 +271,15 @@ export default function EditorCanvas({
             }}
           >
             <div ref={canvasMountRef} className="artwork-canvas" style={{ pointerEvents: 'none' }} />
+
+             {showGrid && (
+                <div
+                  className="placement-grid-overlay"
+                  style={{
+                    backgroundSize: `${gridSizePx}px ${gridSizePx}px`
+                  }}
+                />
+             )}
 
              {/* 1. Trim Line / Cut Line Overlay (Anchored to Canvas) */}
              {showSafeLine && (

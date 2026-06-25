@@ -97,6 +97,9 @@ export default function App() {
   }
 
   const [showSafeLine, setShowSafeLine] = useState(true);
+  const [showGrid, setShowGrid] = useState(false);
+  const [snapToGrid, setSnapToGrid] = useState(false);
+  const [gridSize, setGridSize] = useState(0.125); // Inches
 
   // Bleed settings
   const [bleedEnabled, setBleedEnabled] = useState(false);
@@ -201,6 +204,9 @@ export default function App() {
     setColorMode('auto');
     setSelectedColor('#000000');
     setRecommendedColor('#000000');
+    setShowGrid(false);
+    setSnapToGrid(false);
+    setGridSize(0.125);
     setCurrentAlignment('right');
     setPagePositions({});
     setPageSizes({});
@@ -1056,6 +1062,9 @@ export default function App() {
                 isCropMode={isCropMode}
                 manualCropGuides={manualCropGuides}
                 bugEnabled={bugEnabled}
+                showGrid={showGrid}
+                snapToGrid={snapToGrid}
+                gridSize={gridSize}
                 zoom={zoom}
                 onZoomChange={setZoom}
                 onPositionChange={(pos) => {
@@ -1154,6 +1163,12 @@ export default function App() {
                   onTrimCropToggle={() => setTrimCropEnabled(!trimCropEnabled)}
                   manualCropAmount={manualCropAmount}
                   onManualCropChange={setManualCropAmount}
+                  showGrid={showGrid}
+                  onShowGridToggle={() => setShowGrid(!showGrid)}
+                  snapToGrid={snapToGrid}
+                  onSnapToGridToggle={() => setSnapToGrid(!snapToGrid)}
+                  gridSize={gridSize}
+                  onGridSizeChange={setGridSize}
                   bugEnabled={bugEnabled}
                   onBugEnabledToggle={() => setBugEnabled(!bugEnabled)}
                   onQuickAlign={handleQuickAlign}

@@ -28,6 +28,12 @@ export default function ControlPanel({
   onTrimCropToggle,
   manualCropAmount,
   onManualCropChange,
+  showGrid,
+  onShowGridToggle,
+  snapToGrid,
+  onSnapToGridToggle,
+  gridSize,
+  onGridSizeChange,
   onResetBug
 }) {
 
@@ -123,6 +129,51 @@ export default function ControlPanel({
               </button>
             </div>
             
+          </div>
+
+          {/* 2. Placement Assist */}
+          <div className="sidebar-section">
+            <span className="section-title">Placement Assist</span>
+            <div className="toggle-item" style={{ borderLeft: showGrid ? '3px solid var(--accent)' : '1px solid var(--border-color)' }}>
+              <div className="toggle-info">
+                <h5 style={{ color: showGrid ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Show Grid</h5>
+              </div>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={showGrid}
+                  onChange={onShowGridToggle}
+                />
+                <span className="slider-switch" />
+              </label>
+            </div>
+
+            <div className="toggle-item" style={{ borderLeft: snapToGrid ? '3px solid var(--primary)' : '1px solid var(--border-color)' }}>
+              <div className="toggle-info">
+                <h5 style={{ color: snapToGrid ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Snap to Grid</h5>
+                <p>Applies while dragging only</p>
+              </div>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={snapToGrid}
+                  onChange={onSnapToGridToggle}
+                />
+                <span className="slider-switch" />
+              </label>
+            </div>
+
+            <div className="grid-size-selector">
+              {[0.0625, 0.125, 0.25].map(sizeOption => (
+                <button
+                  key={sizeOption}
+                  className={`btn ${gridSize === sizeOption ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => onGridSizeChange(sizeOption)}
+                >
+                  {sizeOption}"
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* 2. Style & Size Controls */}
