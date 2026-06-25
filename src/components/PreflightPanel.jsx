@@ -10,9 +10,13 @@ import {
 export default function PreflightPanel({
   results,
   isScanning,
+  onRunFullCheck,
   onFix,
   onReset,
-  artworkType
+  artworkType,
+  pdfBoxInfo,
+  currentPage,
+  totalPages
 }) {
 
   if (artworkType !== 'pdf') {
@@ -39,12 +43,76 @@ export default function PreflightPanel({
     );
   }
 
-  if (isScanning || !results) {
+  if (isScanning) {
     return (
       <div className="sidebar-content" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
           <Loader2 size={32} className="spinner" style={{ animation: 'spin 1s linear infinite', color: 'var(--primary)' }} />
-          <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Analyzing PDF...</span>
+          <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Running full preflight...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!results) {
+    return (
+      <div className="sidebar-content" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="section-title" style={{ marginBottom: 0 }}>Preflight Summary</span>
+          <button
+            className="btn btn-secondary"
+            style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', borderStyle: 'dashed' }}
+            onClick={onReset}
+            title="Reset to original artwork"
+          >
+            Reset Artwork
+          </button>
+        </div>
+
+        <div style={{
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px solid var(--border-color)',
+          borderRadius: '12px',
+          padding: '14px 16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <CheckCircle2 size={16} style={{ color: 'var(--success)' }} />
+            <div>
+              <h5 style={{ fontSize: '14px', fontWeight: '600' }}>Basic PDF info loaded</h5>
+              <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: '1.4' }}>
+                Page preview, page count, size, TrimBox, and BleedBox are available without the heavy scan.
+              </p>
+            </div>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '8px',
+            fontSize: '12px'
+          }}>
+            <BasicInfoItem label="Page" value={`${currentPage || 1} / ${totalPages || 1}`} />
+            <BasicInfoItem label="TrimBox" value={pdfBoxInfo?.hasDistinctTrimBox ? 'Detected' : 'Fallback'} />
+            <BasicInfoItem label="BleedBox" value={pdfBoxInfo?.hasDistinctBleedBox ? 'Detected' : 'Not distinct'} />
+            <BasicInfoItem label="CropBox" value={pdfBoxInfo?.cropBox ? formatBoxSize(pdfBoxInfo.cropBox) : 'Loading'} />
+          </div>
+        </div>
+
+        <div className="sidebar-section" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <span className="section-title">Full Preflight</span>
+          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+            Run this when you need image DPI, fonts, color spaces, spot colors, overprint, hidden layers, and blank page checks.
+          </p>
+          <button
+            className="btn btn-primary btn-action-block"
+            style={{ padding: '12px', fontSize: '14px' }}
+            onClick={onRunFullCheck}
+          >
+            Analyze PDF
+          </button>
         </div>
       </div>
     );
@@ -97,7 +165,7 @@ export default function PreflightPanel({
           onClick={onReset}
           title="Reset to original artwork"
         >
-          🔄 Reset Artwork
+          Reset Artwork
         </button>
       </div>
 
@@ -129,7 +197,16 @@ export default function PreflightPanel({
 
       {/* 3. Checks Checklist */}
       <div className="sidebar-section" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        <span className="section-title">Preflight Checks</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+          <span className="section-title" style={{ marginBottom: 0 }}>Preflight Checks</span>
+          <button
+            className="btn btn-secondary"
+            style={{ padding: '6px 10px', fontSize: '12px', borderRadius: '6px' }}
+            onClick={onRunFullCheck}
+          >
+            Re-analyze
+          </button>
+        </div>
         
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {Object.entries(results.checks).map(([key, check]) => {
@@ -198,6 +275,28 @@ export default function PreflightPanel({
       </div>
     </div>
   );
+}
+
+function BasicInfoItem({ label, value }) {
+  return (
+    <div style={{
+      background: 'var(--bg-card)',
+      border: '1px solid var(--border-color)',
+      borderRadius: '8px',
+      padding: '8px 10px',
+      minWidth: 0
+    }}>
+      <div style={{ color: 'var(--text-secondary)', fontSize: '10.5px', fontWeight: '600' }}>{label}</div>
+      <div style={{ color: 'var(--text-primary)', fontSize: '12px', fontWeight: '700', marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function formatBoxSize(box) {
+  if (!box?.width || !box?.height) return 'N/A';
+  return `${(box.width / 72).toFixed(2)}" x ${(box.height / 72).toFixed(2)}"`;
 }
 
 function getCheckTitle(key) {

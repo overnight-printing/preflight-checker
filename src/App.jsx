@@ -9,12 +9,10 @@ import PreflightPanel from './components/PreflightPanel';
 import {
   loadPDF,
   getPDFBoxInfo,
-  renderPDFPageToCanvas,
   processUnionBug,
   stitchBugToPDF,
   stitchBugToImage,
-  drawMirrorBleed,
-  autoDetectCropMarks
+  drawMirrorBleed
 } from './utils/pdfProcessor';
 
 import {
@@ -105,9 +103,8 @@ export default function App() {
   const [bleedAmount, setBleedAmount] = useState(9.0); // Default 0.125" in PDF points
   const [trimCropEnabled, setTrimCropEnabled] = useState(false); // New non-destructive crop toggle
   const [manualCropAmount, setManualCropAmount] = useState(0); // Manual inset in points (72pt = 1 inch)
-  const [isCropMode, setIsCropMode] = useState(false); // Interactive visual crop mode
-  const [manualCropGuides, setManualCropGuides] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
-  const [isAutoDetecting, setIsAutoDetecting] = useState(false); // Drag guides in % or px
+  const [isCropMode] = useState(false); // Interactive visual crop mode disabled
+  const [manualCropGuides] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
 
   const [sourceHasBleed, setSourceHasBleed] = useState(true); // Default true for PDFs (0.125" / 9pt bleed included)
   const [originalImage, setOriginalImage] = useState(null); // Keeps the original Image element for reactive image bleed redraws
@@ -142,29 +139,13 @@ export default function App() {
   // Global drag-and-drop state
   const [isGlobalDragActive, setIsGlobalDragActive] = useState(false);
   const dragCounter = useRef(0);
+  const renderRequestIdRef = useRef(0);
+  const pdfPageCanvasCacheRef = useRef(new Map());
   
   // Multi-page options
   const [multiPageOptions, setMultiPageOptions] = useState({
     applyTo: 'current', // 'current' | 'all' | 'last' | 'first'
   });
-
-  const handleAutoDetectCropMarks = async () => {
-    if (!artworkCanvas) return;
-    setIsAutoDetecting(true);
-    
-    // Slight timeout to allow UI to show loading state if needed
-    setTimeout(() => {
-      const detected = autoDetectCropMarks(artworkCanvas);
-      if (detected) {
-        setIsCropMode(true);
-        setManualCropGuides(detected);
-        console.log('Crop marks auto-detected:', detected);
-      } else {
-        alert('Could not automatically detect crop marks. Please adjust manually.');
-      }
-      setIsAutoDetecting(false);
-    }, 100);
-  };
 
   // Track if we completed the initial alignment placement for a newly loaded artwork
   const [hasDoneInitialAlignment, setHasDoneInitialAlignment] = useState(false);
@@ -237,6 +218,7 @@ export default function App() {
     setOriginalImage(null);
     setPdfBoxInfo(null);
     setPreflightResults(null);
+    pdfPageCanvasCacheRef.current.clear();
     
     try {
       const extension = file.name.split('.').pop().toLowerCase();
@@ -347,6 +329,7 @@ export default function App() {
     setPageSizes({});
     setPageAlignments({});
     setHasDoneInitialAlignment(false);
+    pdfPageCanvasCacheRef.current.clear();
   };
 
   // Resets the current artwork back to the original uploaded file (undo all preflight fixes/crops)
@@ -365,6 +348,7 @@ export default function App() {
         setPdfDoc(doc);
         setTotalPages(doc.numPages);
         setCurrentPage(1);
+        pdfPageCanvasCacheRef.current.clear();
       } else {
         setArtworkType('image');
         setPdfDoc(null);
@@ -401,23 +385,92 @@ export default function App() {
 
 
 
+  const getCachedPDFPageCanvas = async (doc, pageNum) => {
+    const cacheKey = `${pageNum}:${canvasScale}`;
+    const cached = pdfPageCanvasCacheRef.current.get(cacheKey);
+    if (cached) return cached;
+
+    const page = await doc.getPage(pageNum);
+    const viewport = page.getViewport({ scale: canvasScale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    pdfPageCanvasCacheRef.current.set(cacheKey, canvas);
+    return canvas;
+  };
+
+  const buildProcessedCanvas = (source, bleed, selectedBleedAmount = 0, crop = null) => {
+    const cropLeft = Math.max(0, Math.round(crop?.left || 0));
+    const cropTop = Math.max(0, Math.round(crop?.top || 0));
+    const cropRight = Math.max(0, Math.round(crop?.right || 0));
+    const cropBottom = Math.max(0, Math.round(crop?.bottom || 0));
+    const sourceW = source.width || source.naturalWidth;
+    const sourceH = source.height || source.naturalHeight;
+    const finalW = Math.max(1, sourceW - cropLeft - cropRight);
+    const finalH = Math.max(1, sourceH - cropTop - cropBottom);
+    const bleedPx = Math.round((bleed ? selectedBleedAmount : 0) * canvasScale);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(finalW + (bleedPx * 2));
+    canvas.height = Math.round(finalH + (bleedPx * 2));
+    const ctx = canvas.getContext('2d');
+
+    if (bleedPx > 0) {
+      const croppedTemp = document.createElement('canvas');
+      croppedTemp.width = Math.round(finalW);
+      croppedTemp.height = Math.round(finalH);
+      const tempCtx = croppedTemp.getContext('2d');
+      tempCtx.drawImage(source, cropLeft, cropTop, finalW, finalH, 0, 0, finalW, finalH);
+      drawMirrorBleed(ctx, croppedTemp, finalW, finalH, bleedPx);
+    } else {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(source, cropLeft, cropTop, finalW, finalH, 0, 0, finalW, finalH);
+    }
+
+    return canvas;
+  };
+
+  const getPDFCropInsets = (boxInfo, trimCrop, manualCrop) => {
+    const manualCropPx = Math.max(0, manualCrop * canvasScale);
+    const crop = {
+      left: manualCropPx,
+      top: manualCropPx,
+      right: manualCropPx,
+      bottom: manualCropPx
+    };
+
+    if (trimCrop && boxInfo?.trimBox && boxInfo?.cropBox) {
+      const { trimBox, cropBox } = boxInfo;
+      crop.left += (trimBox.x - cropBox.x) * canvasScale;
+      crop.right += ((cropBox.x + cropBox.width) - (trimBox.x + trimBox.width)) * canvasScale;
+      crop.bottom += (trimBox.y - cropBox.y) * canvasScale;
+      crop.top += (cropBox.height - (trimBox.y - cropBox.y + trimBox.height)) * canvasScale;
+    }
+
+    return crop;
+  };
+
   // Render a specific PDF page to canvas (called reactively)
-  const renderPage = async (doc, pageNum, bleedAmount = 0, trimCrop = false, boxInfo = null, manualCrop = 0) => {
+  const renderPage = async (doc, pageNum, bleedAmount = 0, trimCrop = false, boxInfo = null, manualCrop = 0, requestId = renderRequestIdRef.current) => {
     try {
-      const page = await doc.getPage(pageNum);
-      const canvas = document.createElement('canvas');
-      
-      // Render to canvas with bleed parameters (0.125" = 9.0pt) and optional trim/manual crop
-      await renderPDFPageToCanvas(page, canvas, canvasScale, bleedAmount, trimCrop, boxInfo, manualCrop);
+      const baseCanvas = await getCachedPDFPageCanvas(doc, pageNum);
+      if (requestId !== renderRequestIdRef.current) return;
+
+      let activeBoxInfo = boxInfo;
+      if (artworkFile && (!activeBoxInfo || activeBoxInfo.pageNum !== pageNum)) {
+        activeBoxInfo = await getPDFBoxInfo(artworkFile, pageNum);
+        if (requestId !== renderRequestIdRef.current) return;
+        setPdfBoxInfo(activeBoxInfo ? { ...activeBoxInfo, pageNum } : null);
+      }
+
+      const crop = getPDFCropInsets(activeBoxInfo, trimCrop, manualCrop);
+      const canvas = buildProcessedCanvas(baseCanvas, bleedAmount > 0, bleedAmount, crop);
       setArtworkCanvas(canvas);
 
-      // Extract geometry metadata if we have the file
-      if (artworkFile && !boxInfo) {
-        const info = await getPDFBoxInfo(artworkFile, pageNum);
-        setPdfBoxInfo(info);
-      }
-      
-      // Extract dominant colors from the page background
       const colors = extractDominantColors(canvas, true);
       setExtractedColors(colors);
     } catch (error) {
@@ -427,45 +480,13 @@ export default function App() {
 
   // Helper to render an image artwork to canvas with or without mirror bleed (called reactively)
   const renderImageCanvas = (img, bleed, selectedBleedAmount = 9.0, manualCrop = 0) => {
-    const canvas = document.createElement('canvas');
-    const W = img.width;
-    const H = img.height;
-    
-    const activeBleedAmount = bleed ? selectedBleedAmount : 0;
-    const bleedPx = activeBleedAmount * canvasScale;
-    
-    // Convert manualCrop (pt) to pixels
-    const manualCropPx = manualCrop * canvasScale;
-    const finalW = W - (manualCropPx * 2);
-    const finalH = H - (manualCropPx * 2);
-
-    if (bleedPx > 0 || manualCropPx > 0) {
-      canvas.width = Math.round(finalW + (bleedPx * 2));
-      canvas.height = Math.round(finalH + (bleedPx * 2));
-      const ctx = canvas.getContext('2d');
-      
-      if (manualCropPx > 0) {
-        // First crop the image onto a temporary canvas
-        const croppedTemp = document.createElement('canvas');
-        croppedTemp.width = Math.round(finalW);
-        croppedTemp.height = Math.round(finalH);
-        const ctCtx = croppedTemp.getContext('2d');
-        ctCtx.drawImage(img, Math.round(manualCropPx), Math.round(manualCropPx), Math.round(finalW), Math.round(finalH), 0, 0, Math.round(finalW), Math.round(finalH));
-        
-        if (bleedPx > 0) {
-          drawMirrorBleed(ctx, croppedTemp, finalW, finalH, bleedPx);
-        } else {
-          ctx.drawImage(croppedTemp, 0, 0);
-        }
-      } else {
-        drawMirrorBleed(ctx, img, W, H, bleedPx);
-      }
-    } else {
-      canvas.width = W;
-      canvas.height = H;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-    }
+    const manualCropPx = Math.max(0, manualCrop * canvasScale);
+    const canvas = buildProcessedCanvas(img, bleed, selectedBleedAmount, {
+      left: manualCropPx,
+      top: manualCropPx,
+      right: manualCropPx,
+      bottom: manualCropPx
+    });
     
     setArtworkCanvas(canvas);
     
@@ -479,19 +500,23 @@ export default function App() {
     if (!artworkFile) return;
     
     const updateArtworkRender = async () => {
+      const requestId = renderRequestIdRef.current + 1;
+      renderRequestIdRef.current = requestId;
       setIsLoading(true);
       try {
         const activeBleedAmount = bleedEnabled ? bleedAmount : 0;
         
         if (artworkType === 'pdf' && pdfDoc) {
-          await renderPage(pdfDoc, currentPage, activeBleedAmount, trimCropEnabled, pdfBoxInfo, manualCropAmount);
+          await renderPage(pdfDoc, currentPage, activeBleedAmount, trimCropEnabled, pdfBoxInfo, manualCropAmount, requestId);
         } else if (artworkType === 'image' && originalImage) {
           renderImageCanvas(originalImage, bleedEnabled, bleedAmount, manualCropAmount);
         }
       } catch (error) {
         console.error('Error updating artwork render:', error);
       } finally {
-        setIsLoading(false);
+        if (requestId === renderRequestIdRef.current) {
+          setIsLoading(false);
+        }
       }
     };
     
@@ -579,27 +604,25 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bugPosition, bugSize, artworkCanvas, bugEnabled]);
 
-  // Run preflight checks when artwork file or pdfDoc changes
   useEffect(() => {
     if (!artworkFile || artworkType !== 'pdf' || !pdfDoc) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPreflightResults(null);
-      return;
     }
+  }, [artworkFile, pdfDoc, artworkType]);
 
-    const runScan = async () => {
-      setIsScanning(true);
-      try {
-        const results = await runPreflightChecks(artworkFile, pdfDoc);
-        setPreflightResults(results);
-      } catch (err) {
-        console.error('Error running preflight checks:', err);
-      } finally {
-        setIsScanning(false);
-      }
-    };
+  const handleRunFullPreflight = useCallback(async () => {
+    if (!artworkFile || artworkType !== 'pdf' || !pdfDoc) return;
 
-    runScan();
+    setIsScanning(true);
+    try {
+      const results = await runPreflightChecks(artworkFile, pdfDoc);
+      setPreflightResults(results);
+    } catch (err) {
+      console.error('Error running preflight checks:', err);
+    } finally {
+      setIsScanning(false);
+    }
   }, [artworkFile, pdfDoc, artworkType]);
 
   // Handler for Preflight Auto-Fixes
@@ -1131,12 +1154,6 @@ export default function App() {
                   onTrimCropToggle={() => setTrimCropEnabled(!trimCropEnabled)}
                   manualCropAmount={manualCropAmount}
                   onManualCropChange={setManualCropAmount}
-                  isCropMode={isCropMode}
-                  onCropModeToggle={() => setIsCropMode(!isCropMode)}
-                  manualCropGuides={manualCropGuides}
-                  onManualCropGuidesChange={setManualCropGuides}
-                  onAutoDetectCropMarks={handleAutoDetectCropMarks}
-                  isAutoDetecting={isAutoDetecting}
                   bugEnabled={bugEnabled}
                   onBugEnabledToggle={() => setBugEnabled(!bugEnabled)}
                   onQuickAlign={handleQuickAlign}
@@ -1154,9 +1171,13 @@ export default function App() {
                 <PreflightPanel
                   results={preflightResults}
                   isScanning={isScanning}
+                  onRunFullCheck={handleRunFullPreflight}
                   onFix={handlePreflightFix}
                   onReset={handleResetArtwork}
                   artworkType={artworkType}
+                  pdfBoxInfo={pdfBoxInfo}
+                  currentPage={currentPage}
+                  totalPages={totalPages}
                   isExporting={isLoading || isScanning || isExporting}
                 />
               )}
