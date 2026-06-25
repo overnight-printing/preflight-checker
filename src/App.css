@@ -221,14 +221,14 @@
   position: absolute;
   z-index: 4;
   cursor: move;
-  border: 1px dashed transparent;
+  outline: 1px dashed transparent;
   user-select: none;
   touch-action: none;
-  box-sizing: content-box;
+  box-sizing: border-box;
 }
 
 .draggable-bug:hover, .draggable-bug.active {
-  border-color: var(--primary);
+  outline-color: var(--primary);
   background: rgba(40, 51, 119, 0.1);
 }
 
