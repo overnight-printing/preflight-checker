@@ -47,6 +47,22 @@ const loadImageElement = (file) => {
   });
 };
 
+const downloadFile = (data, filename) => {
+  const link = document.createElement('a');
+  link.href = data instanceof Blob ? URL.createObjectURL(data) : data;
+  link.download = filename;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  if (data instanceof Blob) {
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  }
+};
+
+const LARGE_PDF_BROWSER_LIMIT_BYTES = 250 * 1024 * 1024;
+
 export default function App() {
   // File states
   const [artworkFile, setArtworkFile] = useState(null);
@@ -819,6 +835,13 @@ export default function App() {
       const activeBleedAmount = bleedEnabled ? bleedAmount : 0;
       
       if (artworkType === 'pdf') {
+        if (artworkFile.size > LARGE_PDF_BROWSER_LIMIT_BYTES) {
+          const sizeMb = Math.round(artworkFile.size / (1024 * 1024));
+          throw new Error(
+            `This PDF is ${sizeMb} MB, which is too large for browser-based PDF export. Use the local large-PDF workflow instead.`
+          );
+        }
+
         // Resolve target pages to stamp
         let pagesToStitch = [];
         if (!bugEnabled) {
@@ -857,12 +880,8 @@ export default function App() {
           manualCropGuides
         );
         
-        // Trigger browser download
         const blob = new Blob([outputBytes], { type: 'application/pdf' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `${safeFilename}.pdf`;
-        link.click();
+        downloadFile(blob, `${safeFilename}.pdf`);
       } else {
         // Image export (pass bleed in pixels)
         const bleedPx = activeBleedAmount * canvasScale;
@@ -875,14 +894,11 @@ export default function App() {
           bugEnabled // Pass toggle state
         );
         
-        const link = document.createElement('a');
-        link.href = finalImageDataUrl;
-        link.download = `${safeFilename}.png`;
-        link.click();
+        downloadFile(finalImageDataUrl, `${safeFilename}.png`);
       }
     } catch (error) {
       console.error('Export error:', error);
-      alert('Error saving file.');
+      alert(error?.message || 'Error saving file.');
     } finally {
       setIsExporting(false);
     }

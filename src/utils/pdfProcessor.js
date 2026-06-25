@@ -231,6 +231,76 @@ export function drawMirrorBleed(ctx, orig, W, H, B) {
   ctx.restore();
 }
 
+async function drawMirrorBleedStripsToPDF(pdfDoc, page, baseCanvas, widthPt, heightPt, bleedPt, scale) {
+  const widthPx = Math.round(widthPt * scale);
+  const heightPx = Math.round(heightPt * scale);
+  const bleedPx = Math.round(bleedPt * scale);
+
+  if (widthPx <= 0 || heightPx <= 0 || bleedPx <= 0) return;
+
+  const makeStrip = (canvasWidth, canvasHeight, draw) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(canvasWidth));
+    canvas.height = Math.max(1, Math.round(canvasHeight));
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    draw(ctx);
+    return canvas.toDataURL('image/png');
+  };
+
+  const drawPng = async (dataUrl, x, y, width, height) => {
+    const image = await pdfDoc.embedPng(dataUrl);
+    page.drawImage(image, { x, y, width, height });
+  };
+
+  await drawPng(makeStrip(bleedPx, heightPx, (ctx) => {
+    ctx.translate(bleedPx, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(baseCanvas, 0, 0, bleedPx, heightPx, 0, 0, bleedPx, heightPx);
+  }), 0, bleedPt, bleedPt, heightPt);
+
+  await drawPng(makeStrip(bleedPx, heightPx, (ctx) => {
+    ctx.translate(bleedPx, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(baseCanvas, widthPx - bleedPx, 0, bleedPx, heightPx, 0, 0, bleedPx, heightPx);
+  }), bleedPt + widthPt, bleedPt, bleedPt, heightPt);
+
+  await drawPng(makeStrip(widthPx, bleedPx, (ctx) => {
+    ctx.translate(0, bleedPx);
+    ctx.scale(1, -1);
+    ctx.drawImage(baseCanvas, 0, 0, widthPx, bleedPx, 0, 0, widthPx, bleedPx);
+  }), bleedPt, bleedPt + heightPt, widthPt, bleedPt);
+
+  await drawPng(makeStrip(widthPx, bleedPx, (ctx) => {
+    ctx.translate(0, bleedPx);
+    ctx.scale(1, -1);
+    ctx.drawImage(baseCanvas, 0, heightPx - bleedPx, widthPx, bleedPx, 0, 0, widthPx, bleedPx);
+  }), bleedPt, 0, widthPt, bleedPt);
+
+  await drawPng(makeStrip(bleedPx, bleedPx, (ctx) => {
+    ctx.translate(bleedPx, bleedPx);
+    ctx.scale(-1, -1);
+    ctx.drawImage(baseCanvas, 0, 0, bleedPx, bleedPx, 0, 0, bleedPx, bleedPx);
+  }), 0, bleedPt + heightPt, bleedPt, bleedPt);
+
+  await drawPng(makeStrip(bleedPx, bleedPx, (ctx) => {
+    ctx.translate(bleedPx, bleedPx);
+    ctx.scale(-1, -1);
+    ctx.drawImage(baseCanvas, widthPx - bleedPx, 0, bleedPx, bleedPx, 0, 0, bleedPx, bleedPx);
+  }), bleedPt + widthPt, bleedPt + heightPt, bleedPt, bleedPt);
+
+  await drawPng(makeStrip(bleedPx, bleedPx, (ctx) => {
+    ctx.translate(bleedPx, bleedPx);
+    ctx.scale(-1, -1);
+    ctx.drawImage(baseCanvas, 0, heightPx - bleedPx, bleedPx, bleedPx, 0, 0, bleedPx, bleedPx);
+  }), 0, 0, bleedPt, bleedPt);
+
+  await drawPng(makeStrip(bleedPx, bleedPx, (ctx) => {
+    ctx.translate(bleedPx, bleedPx);
+    ctx.scale(-1, -1);
+    ctx.drawImage(baseCanvas, widthPx - bleedPx, heightPx - bleedPx, bleedPx, bleedPx, 0, 0, bleedPx, bleedPx);
+  }), bleedPt + widthPt, 0, bleedPt, bleedPt);
+}
+
 function canvasRectToPdfRect(position, size, canvasScale, pdfHeight, originX = 0, originY = 0) {
   return {
     x: originX + (position.left / canvasScale),
@@ -529,7 +599,7 @@ export async function stitchBugToPDF(
       }
     }
     
-    return await pdfDoc.save();
+    return await pdfDoc.save({ useObjectStreams: false });
   }
   
   // Option B: Expanded Print Output (Bleed OR Manual Crop Enabled)
@@ -580,17 +650,24 @@ export async function stitchBugToPDF(
     const newWidth = origWidth + (bleedAmount * 2);
     const newHeight = origHeight + (bleedAmount * 2);
     
-    const newPage = outputDoc.addPage([newWidth, newHeight]);
+    const preserveOriginalContent = manualCropAmount === 0 && !isCropMode;
+    let newPage;
+
+    if (preserveOriginalContent) {
+      const [copiedPage] = await outputDoc.copyPages(pdfDoc, [i]);
+      newPage = copiedPage;
+      outputDoc.addPage(newPage);
+      newPage.translateContent(bleedAmount - activeBaseBox.x, bleedAmount - activeBaseBox.y);
+      newPage.contentStream = undefined;
+      newPage.contentStreamRef = undefined;
+    } else {
+      newPage = outputDoc.addPage([newWidth, newHeight]);
+    }
     
     // Render PDF page to a high-DPI canvas
     const pdfjsPage = await pdfjsDoc.getPage(pageNum);
     const renderScale = 3.5; // High definition print resolution
     const viewport = pdfjsPage.getViewport({ scale: renderScale });
-    
-    const highResCanvas = document.createElement('canvas');
-    highResCanvas.width = Math.round((origWidth + (bleedAmount * 2)) * renderScale);
-    highResCanvas.height = Math.round((origHeight + (bleedAmount * 2)) * renderScale);
-    const hrCtx = highResCanvas.getContext('2d', { willReadFrequently: true });
     
     // Render original vector page to a temp canvas
     const tempCanvasFull = document.createElement('canvas');
@@ -621,19 +698,47 @@ export async function stitchBugToPDF(
       0, 0, Math.round(origWidth * renderScale), Math.round(origHeight * renderScale)
     );
     
-    // Apply mirror bleed algorithm at high resolution (background layers only)
-    drawMirrorBleed(hrCtx, tempCanvasBase, origWidth * renderScale, origHeight * renderScale, bleedAmount * renderScale);
-    
-    // Compress high-res canvas to PNG and embed in output PDF page
-    const pageDataUrl = highResCanvas.toDataURL('image/png');
-    const pageImg = await outputDoc.embedPng(pageDataUrl);
-    
-    newPage.drawImage(pageImg, {
-      x: 0,
-      y: 0,
-      width: newWidth,
-      height: newHeight
-    });
+    if (preserveOriginalContent) {
+      await drawMirrorBleedStripsToPDF(
+        outputDoc,
+        newPage,
+        tempCanvasBase,
+        origWidth,
+        origHeight,
+        bleedAmount,
+        renderScale
+      );
+    } else {
+      const highResCanvas = document.createElement('canvas');
+      highResCanvas.width = Math.round((origWidth + (bleedAmount * 2)) * renderScale);
+      highResCanvas.height = Math.round((origHeight + (bleedAmount * 2)) * renderScale);
+      const hrCtx = highResCanvas.getContext('2d', { willReadFrequently: true });
+
+      // Apply mirror bleed algorithm at high resolution (background layers only)
+      drawMirrorBleed(hrCtx, tempCanvasBase, origWidth * renderScale, origHeight * renderScale, bleedAmount * renderScale);
+
+      // Compress high-res canvas to PNG and embed it as the rasterized output page.
+      const pageDataUrl = highResCanvas.toDataURL('image/png');
+      const pageImg = await outputDoc.embedPng(pageDataUrl);
+
+      newPage.drawImage(pageImg, {
+        x: 0,
+        y: 0,
+        width: newWidth,
+        height: newHeight
+      });
+    }
+
+    if (preserveOriginalContent) {
+      const contents = newPage.node.normalizedEntries().Contents;
+      const backgroundStreamRef = newPage.contentStreamRef;
+      const backgroundStreamIndex = contents?.indexOf(backgroundStreamRef);
+
+      if (backgroundStreamIndex !== undefined) {
+        contents.remove(backgroundStreamIndex);
+        contents.insert(0, backgroundStreamRef);
+      }
+    }
 
     // Set professional prepress boxes for printing
     newPage.setMediaBox(0, 0, newWidth, newHeight);
@@ -662,7 +767,7 @@ export async function stitchBugToPDF(
     }
   }
   
-  return await outputDoc.save();
+  return await outputDoc.save({ useObjectStreams: false });
 }
 
 /**
