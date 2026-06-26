@@ -301,6 +301,43 @@ async function drawMirrorBleedStripsToPDF(pdfDoc, page, baseCanvas, widthPt, hei
   }), bleedPt + widthPt, 0, bleedPt, bleedPt);
 }
 
+async function drawVectorMirrorBleedStripsToPDF(pdfDoc, page, sourcePage, baseBox, widthPt, heightPt, bleedPt) {
+  const left = baseBox.x;
+  const bottom = baseBox.y;
+  const right = baseBox.x + widthPt;
+  const top = baseBox.y + heightPt;
+
+  const [
+    leftStrip,
+    rightStrip,
+    topStrip,
+    bottomStrip,
+    topLeft,
+    topRight,
+    bottomLeft,
+    bottomRight
+  ] = await Promise.all([
+    pdfDoc.embedPage(sourcePage, { left, bottom, right: left + bleedPt, top }),
+    pdfDoc.embedPage(sourcePage, { left: right - bleedPt, bottom, right, top }),
+    pdfDoc.embedPage(sourcePage, { left, bottom: top - bleedPt, right, top }),
+    pdfDoc.embedPage(sourcePage, { left, bottom, right, top: bottom + bleedPt }),
+    pdfDoc.embedPage(sourcePage, { left, bottom: top - bleedPt, right: left + bleedPt, top }),
+    pdfDoc.embedPage(sourcePage, { left: right - bleedPt, bottom: top - bleedPt, right, top }),
+    pdfDoc.embedPage(sourcePage, { left, bottom, right: left + bleedPt, top: bottom + bleedPt }),
+    pdfDoc.embedPage(sourcePage, { left: right - bleedPt, bottom, right, top: bottom + bleedPt })
+  ]);
+
+  page.drawPage(leftStrip, { x: bleedPt, y: bleedPt, xScale: -1, yScale: 1 });
+  page.drawPage(rightStrip, { x: bleedPt + widthPt + bleedPt, y: bleedPt, xScale: -1, yScale: 1 });
+  page.drawPage(topStrip, { x: bleedPt, y: bleedPt + heightPt + bleedPt, xScale: 1, yScale: -1 });
+  page.drawPage(bottomStrip, { x: bleedPt, y: bleedPt, xScale: 1, yScale: -1 });
+
+  page.drawPage(topLeft, { x: bleedPt, y: bleedPt + heightPt + bleedPt, xScale: -1, yScale: -1 });
+  page.drawPage(topRight, { x: bleedPt + widthPt + bleedPt, y: bleedPt + heightPt + bleedPt, xScale: -1, yScale: -1 });
+  page.drawPage(bottomLeft, { x: bleedPt, y: bleedPt, xScale: -1, yScale: -1 });
+  page.drawPage(bottomRight, { x: bleedPt + widthPt + bleedPt, y: bleedPt, xScale: -1, yScale: -1 });
+}
+
 function canvasRectToPdfRect(position, size, canvasScale, pdfHeight, originX = 0, originY = 0) {
   return {
     x: originX + (position.left / canvasScale),
@@ -699,15 +736,28 @@ export async function stitchBugToPDF(
     );
     
     if (preserveOriginalContent) {
-      await drawMirrorBleedStripsToPDF(
-        outputDoc,
-        newPage,
-        tempCanvasBase,
-        origWidth,
-        origHeight,
-        bleedAmount,
-        renderScale
-      );
+      try {
+        await drawVectorMirrorBleedStripsToPDF(
+          outputDoc,
+          newPage,
+          originalPage,
+          activeBaseBox,
+          origWidth,
+          origHeight,
+          bleedAmount
+        );
+      } catch (error) {
+        console.warn('Vector mirror bleed failed; falling back to raster strips.', error);
+        await drawMirrorBleedStripsToPDF(
+          outputDoc,
+          newPage,
+          tempCanvasBase,
+          origWidth,
+          origHeight,
+          bleedAmount,
+          renderScale
+        );
+      }
     } else {
       const highResCanvas = document.createElement('canvas');
       highResCanvas.width = Math.round((origWidth + (bleedAmount * 2)) * renderScale);
