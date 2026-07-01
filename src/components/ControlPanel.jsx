@@ -308,7 +308,7 @@ export default function ControlPanel({
           </label>
         </div>
 
-        {bleedEnabled && !sourceHasBleed && (
+        {bleedEnabled && (
           <div style={{
             marginTop: '8px',
             padding: '12px',

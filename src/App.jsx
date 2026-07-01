@@ -175,7 +175,7 @@ export default function App() {
 
   // Safe zone is ALWAYS 9pt (0.125") inside the trim/cut line — hardcoded, not adjustable
   const pdfHasIncludedBleed = artworkType === 'pdf' && Boolean(pdfBoxInfo?.hasDistinctBleedBox);
-  const effectiveBleedAmount = bleedEnabled && !pdfHasIncludedBleed ? bleedAmount : 0;
+  const effectiveBleedAmount = bleedEnabled ? bleedAmount : 0;
 
   // Utility to format PDF points (pt) into physical dimensions (inches & millimeters)
   const formatPtToPhysical = (width, height) => {
@@ -854,11 +854,7 @@ export default function App() {
       }
       
       if (artworkType === 'pdf') {
-        const exportBoxInfo = pdfBoxInfo?.pageNum === currentPage
-          ? pdfBoxInfo
-          : await getPDFBoxInfo(artworkFile, currentPage);
-        const exportHasIncludedBleed = Boolean(exportBoxInfo?.hasDistinctBleedBox);
-        const activeBleedAmount = bleedEnabled && !exportHasIncludedBleed ? bleedAmount : 0;
+        const activeBleedAmount = bleedEnabled ? bleedAmount : 0;
 
         if (artworkFile.size > LARGE_PDF_BROWSER_LIMIT_BYTES) {
           const sizeMb = Math.round(artworkFile.size / (1024 * 1024));
@@ -1035,7 +1031,11 @@ export default function App() {
                       let finalCanvasH = finalTrimH;
                       let bleedLabel = 'None';
 
-                      if (hasMetadataBleed) {
+                      if (bleedEnabled) {
+                        finalCanvasW += bleedAmount * 2;
+                        finalCanvasH += bleedAmount * 2;
+                        bleedLabel = `${(bleedAmount / 72).toFixed(3)}" (Output)`;
+                      } else if (hasMetadataBleed) {
                         const horizontalBleed = pdfBoxInfo.bleedInsets.left + pdfBoxInfo.bleedInsets.right;
                         const verticalBleed = pdfBoxInfo.bleedInsets.top + pdfBoxInfo.bleedInsets.bottom;
                         finalCanvasW += horizontalBleed;
@@ -1048,10 +1048,6 @@ export default function App() {
                         bleedLabel = uniformBleed
                           ? `${(bleedValues[0] / 72).toFixed(3)}" (Included)`
                           : 'Variable (Included)';
-                      } else if (bleedEnabled) {
-                        finalCanvasW += bleedAmount * 2;
-                        finalCanvasH += bleedAmount * 2;
-                        bleedLabel = `${(bleedAmount / 72).toFixed(3)}" (Added)`;
                       }
 
                       return (

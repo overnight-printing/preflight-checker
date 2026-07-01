@@ -5,6 +5,52 @@ import { decodePDFRawStream } from 'pdf-lib/es/core/streams/decode';
 // Set up the PDF.js worker from jsDelivr CDN
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
+const STANDARD_BLEED_PT = 9.0;
+
+function boxesDiffer(a, b) {
+  return (
+    Math.abs(a.x - b.x) > 0.01 ||
+    Math.abs(a.y - b.y) > 0.01 ||
+    Math.abs(a.width - b.width) > 0.01 ||
+    Math.abs(a.height - b.height) > 0.01
+  );
+}
+
+function looksLikeBleedIncludedDimension(valuePt) {
+  const trimPt = valuePt - (STANDARD_BLEED_PT * 2);
+  if (trimPt <= 0) return false;
+  return Math.abs((trimPt / 18) - Math.round(trimPt / 18)) < 0.01;
+}
+
+function getUsableTrimBox(cropBox, trimBox) {
+  if (boxesDiffer(trimBox, cropBox)) {
+    return {
+      trimBox,
+      inferred: false
+    };
+  }
+
+  if (
+    looksLikeBleedIncludedDimension(cropBox.width) &&
+    looksLikeBleedIncludedDimension(cropBox.height)
+  ) {
+    return {
+      trimBox: {
+        x: cropBox.x + STANDARD_BLEED_PT,
+        y: cropBox.y + STANDARD_BLEED_PT,
+        width: cropBox.width - (STANDARD_BLEED_PT * 2),
+        height: cropBox.height - (STANDARD_BLEED_PT * 2)
+      },
+      inferred: true
+    };
+  }
+
+  return {
+    trimBox,
+    inferred: false
+  };
+}
+
 /**
  * Loads a PDF file and returns the pdfjs document object.
  * 
@@ -36,7 +82,8 @@ export async function getPDFBoxInfo(file, pageNum) {
     // Standard fallbacks if they are undefined in the PDF structure
     const mediaBox = page.getMediaBox() || { x: 0, y: 0, width: 0, height: 0 };
     const cropBox = page.getCropBox() || mediaBox;
-    const trimBox = page.getTrimBox() || cropBox;
+    const rawTrimBox = page.getTrimBox() || cropBox;
+    const { trimBox, inferred: hasInferredTrimBox } = getUsableTrimBox(cropBox, rawTrimBox);
     const bleedBox = page.getBleedBox() || cropBox;
 
     // pdf-lib's getTrimBox() falls back to CropBox when TrimBox metadata is
@@ -48,7 +95,7 @@ export async function getPDFBoxInfo(file, pageNum) {
       bottom: trimBox.y - cropBox.y,
       top: (cropBox.y + cropBox.height) - (trimBox.y + trimBox.height)
     };
-    const hasDistinctTrimBox = Object.values(trimInsets).some((value) => Math.abs(value) > 0.01);
+    const hasDistinctTrimBox = hasInferredTrimBox || Object.values(trimInsets).some((value) => Math.abs(value) > 0.01);
 
     const bleedInsets = {
       left: trimBox.x - bleedBox.x,
@@ -67,6 +114,7 @@ export async function getPDFBoxInfo(file, pageNum) {
       trimBox: { x: trimBox.x, y: trimBox.y, width: trimBox.width, height: trimBox.height },
       bleedBox: { x: bleedBox.x, y: bleedBox.y, width: bleedBox.width, height: bleedBox.height },
       hasDistinctTrimBox,
+      hasInferredTrimBox,
       trimInsets,
       hasDistinctBleedBox,
       bleedInsets
@@ -618,7 +666,8 @@ export async function stitchBugToPDF(
         
         const page = pages[pageNum - 1];
         const cropBox = page.getCropBox();
-        const trimBox = page.getTrimBox() || cropBox;
+        const rawTrimBox = page.getTrimBox() || cropBox;
+        const { trimBox } = getUsableTrimBox(cropBox, rawTrimBox);
 
         // Note: Option A doesn't execute if manualCropAmount > 0 or isCropMode is true.
         // We will force Option B if isCropMode is true below.
@@ -669,10 +718,14 @@ export async function stitchBugToPDF(
     
     // Base layout coordinates and page dimensions on the CropBox or TrimBox
     const cropBox = originalPage.getCropBox();
-    const trimBox = originalPage.getTrimBox() || cropBox;
+    const rawTrimBox = originalPage.getTrimBox() || cropBox;
+    const { trimBox, inferred: hasInferredTrimBox } = getUsableTrimBox(cropBox, rawTrimBox);
     
-    // If trimCropEnabled is true, we act as if the TrimBox IS the entire page area
-    const activeBaseBox = trimCropEnabled ? trimBox : cropBox;
+    // Mirror bleed must be built from the true trim/cut area. If metadata is
+    // missing but the page size looks like trim plus 0.125" bleed, use the
+    // inferred trim instead of treating the whole page as the finished size.
+    const useTrimBase = trimCropEnabled || bleedAmount > 0 || hasInferredTrimBox;
+    const activeBaseBox = useTrimBase ? trimBox : cropBox;
     
     let origWidth = activeBaseBox.width;
     let origHeight = activeBaseBox.height;
