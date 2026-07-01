@@ -158,6 +158,7 @@ export default function App() {
   // Global drag-and-drop state
   const [isGlobalDragActive, setIsGlobalDragActive] = useState(false);
   const dragCounter = useRef(0);
+  const artworkLoadRequestIdRef = useRef(0);
   const renderRequestIdRef = useRef(0);
   const pdfPageCanvasCacheRef = useRef(new Map());
   
@@ -233,8 +234,9 @@ export default function App() {
 
   // 1. Handle Artwork File Upload
   const handleArtworkSelect = useCallback(async (file) => {
-    const requestId = renderRequestIdRef.current + 1;
-    renderRequestIdRef.current = requestId;
+    const requestId = artworkLoadRequestIdRef.current + 1;
+    artworkLoadRequestIdRef.current = requestId;
+    renderRequestIdRef.current += 1;
 
     setIsLoading(true);
     resetUnionBugSettings();
@@ -256,7 +258,7 @@ export default function App() {
         setArtworkType('pdf');
         setSourceHasBleed(true); // PDFs are typically print-ready with 0.125" bleed
         const doc = await loadPDF(file);
-        if (requestId !== renderRequestIdRef.current) return;
+        if (requestId !== artworkLoadRequestIdRef.current) return;
         setPdfDoc(doc);
         setTotalPages(doc.numPages);
         setCurrentPage(1);
@@ -267,16 +269,16 @@ export default function App() {
         setTotalPages(1);
         setCurrentPage(1);
         const img = await loadImageElement(file);
-        if (requestId !== renderRequestIdRef.current) return;
+        if (requestId !== artworkLoadRequestIdRef.current) return;
         setOriginalImage(img);
       }
     } catch (error) {
-      if (requestId !== renderRequestIdRef.current) return;
+      if (requestId !== artworkLoadRequestIdRef.current) return;
       console.error('Error loading artwork file:', error);
       alert('Error loading artwork file.');
       setArtworkFile(null);
     } finally {
-      if (requestId === renderRequestIdRef.current) {
+      if (requestId === artworkLoadRequestIdRef.current) {
         setIsLoading(false);
       }
     }
@@ -352,6 +354,7 @@ export default function App() {
 
   // Clears the artwork state
   const handleClearArtwork = () => {
+    artworkLoadRequestIdRef.current += 1;
     renderRequestIdRef.current += 1;
     setArtworkFile(null);
     setOriginalFile(null);
