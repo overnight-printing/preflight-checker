@@ -1,6 +1,6 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import { PDFDocument, PDFName, PDFRawStream, PDFArray } from 'pdf-lib';
-import { decodePDFRawStream } from 'pdf-lib/es/core/streams/decode';
+import { decodePDFRawStream } from 'pdf-lib/es/core/streams/decode.js';
 
 // Set up the PDF.js worker from jsDelivr CDN
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
@@ -49,6 +49,19 @@ function getUsableTrimBox(cropBox, trimBox) {
     trimBox,
     inferred: false
   };
+}
+
+function boxContainsBleed(cropBox, trimBox, bleedAmount) {
+  if (bleedAmount <= 0) return true;
+
+  const bleedInsets = {
+    left: trimBox.x - cropBox.x,
+    right: (cropBox.x + cropBox.width) - (trimBox.x + trimBox.width),
+    bottom: trimBox.y - cropBox.y,
+    top: (cropBox.y + cropBox.height) - (trimBox.y + trimBox.height)
+  };
+
+  return Object.values(bleedInsets).every((value) => value >= bleedAmount - 0.01);
 }
 
 /**
@@ -700,7 +713,11 @@ export async function stitchBugToPDF(
   
   // Option B: Expanded Print Output (Bleed OR Manual Crop Enabled)
   const outputDoc = await PDFDocument.create();
-  const pdfjsDoc = await loadPDF(originalPDFFile);
+  let pdfjsDoc = null;
+  const getPdfJsDoc = async () => {
+    if (!pdfjsDoc) pdfjsDoc = await loadPDF(originalPDFFile);
+    return pdfjsDoc;
+  };
   
   // Embed vector bug in the output doc context
   if (bugEnabled && bugDocObj) {
@@ -778,9 +795,14 @@ export async function stitchBugToPDF(
     const newTrimY = bleedAmount;
     newPage.setTrimBox(newTrimX, newTrimY, origWidth, origHeight);
 
-    if (preserveOriginalContent) {
+    const sourceBleedAlreadyCoversOutput = preserveOriginalContent
+      && boxContainsBleed(cropBox, activeBaseBox, bleedAmount)
+      && Math.abs(newWidth - cropBox.width) < 0.01
+      && Math.abs(newHeight - cropBox.height) < 0.01;
+
+    if (preserveOriginalContent && !sourceBleedAlreadyCoversOutput) {
       const { tempCanvasBase, renderScale } = await renderBasePageCanvas(
-        pdfjsDoc,
+        await getPdfJsDoc(),
         pageNum,
         origWidth,
         origHeight,
@@ -803,7 +825,7 @@ export async function stitchBugToPDF(
       );
     } else {
       const { tempCanvasBase, renderScale } = await renderBasePageCanvas(
-        pdfjsDoc,
+        await getPdfJsDoc(),
         pageNum,
         origWidth,
         origHeight,
