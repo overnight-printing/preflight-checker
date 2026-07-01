@@ -233,13 +233,20 @@ export default function App() {
 
   // 1. Handle Artwork File Upload
   const handleArtworkSelect = useCallback(async (file) => {
+    const requestId = renderRequestIdRef.current + 1;
+    renderRequestIdRef.current = requestId;
+
     setIsLoading(true);
     resetUnionBugSettings();
     setArtworkFile(file);
     setOriginalFile(file); // Store initial upload as backup
+    setArtworkCanvas(null);
+    setPdfDoc(null);
     setOriginalImage(null);
     setPdfBoxInfo(null);
     setPreflightResults(null);
+    setTotalPages(1);
+    setCurrentPage(1);
     pdfPageCanvasCacheRef.current.clear();
     
     try {
@@ -249,6 +256,7 @@ export default function App() {
         setArtworkType('pdf');
         setSourceHasBleed(true); // PDFs are typically print-ready with 0.125" bleed
         const doc = await loadPDF(file);
+        if (requestId !== renderRequestIdRef.current) return;
         setPdfDoc(doc);
         setTotalPages(doc.numPages);
         setCurrentPage(1);
@@ -259,14 +267,18 @@ export default function App() {
         setTotalPages(1);
         setCurrentPage(1);
         const img = await loadImageElement(file);
+        if (requestId !== renderRequestIdRef.current) return;
         setOriginalImage(img);
       }
     } catch (error) {
+      if (requestId !== renderRequestIdRef.current) return;
       console.error('Error loading artwork file:', error);
       alert('Error loading artwork file.');
       setArtworkFile(null);
     } finally {
-      setIsLoading(false);
+      if (requestId === renderRequestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [resetUnionBugSettings]);
 
@@ -340,6 +352,7 @@ export default function App() {
 
   // Clears the artwork state
   const handleClearArtwork = () => {
+    renderRequestIdRef.current += 1;
     setArtworkFile(null);
     setOriginalFile(null);
     setArtworkCanvas(null);
