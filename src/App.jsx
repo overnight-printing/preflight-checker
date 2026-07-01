@@ -191,7 +191,7 @@ export default function App() {
   useEffect(() => {
     const loadDefaultBug = async () => {
       try {
-        const response = await fetch('/union-bug-black.pdf');
+        const response = await fetch(`${import.meta.env.BASE_URL}union-bug-black.pdf`);
         if (!response.ok) throw new Error('Default union bug not found');
         const blob = await response.blob();
         const file = new File([blob], 'union-bug-black.pdf', { type: 'application/pdf' });
@@ -849,6 +849,10 @@ export default function App() {
     try {
       const safeFilename = artworkFile.name.replace(/\.[^/.]+$/, "") + (bugEnabled ? '_Proof' : '_Fixed');
       const activeBleedAmount = bleedEnabled ? bleedAmount : 0;
+
+      if (bugEnabled && !bugFile) {
+        throw new Error('Union Bug PDF is not loaded. Upload a Union Bug PDF or reload the app before saving.');
+      }
       
       if (artworkType === 'pdf') {
         if (artworkFile.size > LARGE_PDF_BROWSER_LIMIT_BYTES) {
