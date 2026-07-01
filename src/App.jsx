@@ -174,6 +174,8 @@ export default function App() {
   const [isThumbnailsExpanded, setIsThumbnailsExpanded] = useState(false);
 
   // Safe zone is ALWAYS 9pt (0.125") inside the trim/cut line — hardcoded, not adjustable
+  const pdfHasIncludedBleed = artworkType === 'pdf' && Boolean(pdfBoxInfo?.hasDistinctBleedBox);
+  const effectiveBleedAmount = bleedEnabled && !pdfHasIncludedBleed ? bleedAmount : 0;
 
   // Utility to format PDF points (pt) into physical dimensions (inches & millimeters)
   const formatPtToPhysical = (width, height) => {
@@ -542,10 +544,8 @@ export default function App() {
       renderRequestIdRef.current = requestId;
       setIsLoading(true);
       try {
-        const activeBleedAmount = bleedEnabled ? bleedAmount : 0;
-        
         if (artworkType === 'pdf' && pdfDoc) {
-          await renderPage(pdfDoc, currentPage, activeBleedAmount, trimCropEnabled, pdfBoxInfo, manualCropAmount, requestId);
+          await renderPage(pdfDoc, currentPage, effectiveBleedAmount, trimCropEnabled, pdfBoxInfo, manualCropAmount, requestId);
         } else if (artworkType === 'image' && originalImage) {
           renderImageCanvas(originalImage, bleedEnabled, bleedAmount, manualCropAmount);
         }
@@ -560,7 +560,7 @@ export default function App() {
     
     updateArtworkRender();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bleedEnabled, bleedAmount, trimCropEnabled, manualCropAmount, currentPage, originalImage, pdfDoc, pdfBoxInfo]);
+  }, [effectiveBleedAmount, bleedEnabled, bleedAmount, trimCropEnabled, manualCropAmount, currentPage, originalImage, pdfDoc, pdfBoxInfo]);
 
   // 2. Handle Union Bug File Upload
   const handleBugSelect = async (file) => {
@@ -728,7 +728,7 @@ export default function App() {
   const handleQuickAlign = useCallback((alignment) => {
     if (!artworkCanvas || !bugSize) return;
 
-    const virtualBleedPx = (bleedEnabled ? bleedAmount : 0) * canvasScale;
+    const virtualBleedPx = effectiveBleedAmount * canvasScale;
     const metadataInsets = pdfBoxInfo?.hasDistinctTrimBox && !trimCropEnabled
       ? {
           left: Math.max(0, (pdfBoxInfo.trimInsets.left - manualCropAmount) * canvasScale),
@@ -775,7 +775,7 @@ export default function App() {
     if (alignment !== 'custom') {
       setCurrentAlignment(alignment);
     }
-  }, [artworkCanvas, bugSize, bleedEnabled, bleedAmount, canvasScale, hasDoneInitialAlignment, pdfBoxInfo, currentPage, trimCropEnabled, manualCropAmount, isCropMode, manualCropGuides]);
+  }, [artworkCanvas, bugSize, effectiveBleedAmount, canvasScale, hasDoneInitialAlignment, pdfBoxInfo, currentPage, trimCropEnabled, manualCropAmount, isCropMode, manualCropGuides]);
 
   // Automatically align bug if alignment mode is active (not custom)
   useEffect(() => {
@@ -848,7 +848,7 @@ export default function App() {
     
     try {
       const safeFilename = artworkFile.name.replace(/\.[^/.]+$/, "") + (bugEnabled ? '_Proof' : '_Fixed');
-      const activeBleedAmount = bleedEnabled ? bleedAmount : 0;
+      const activeBleedAmount = artworkType === 'pdf' ? effectiveBleedAmount : (bleedEnabled ? bleedAmount : 0);
 
       if (bugEnabled && !bugFile) {
         throw new Error('Union Bug PDF is not loaded. Upload a Union Bug PDF or reload the app before saving.');
@@ -1092,7 +1092,7 @@ export default function App() {
                 sourceHasBleed={sourceHasBleed}
                 showSafeLine={showSafeLine}
                 bleedEnabled={bleedEnabled} // Draw actual Magenta Trim Line
-                bleedAmount={bleedAmount}
+                bleedAmount={effectiveBleedAmount}
                 trimCropEnabled={trimCropEnabled}
                 manualCropAmount={manualCropAmount}
                 isCropMode={isCropMode}
@@ -1192,6 +1192,7 @@ export default function App() {
                   maxScale={maxScale}
                   showSafeLine={showSafeLine}
                   bleedEnabled={bleedEnabled}
+                  sourceHasBleed={pdfHasIncludedBleed}
                   onBleedToggle={() => setBleedEnabled(!bleedEnabled)}
                   bleedAmount={bleedAmount}
                   onBleedAmountChange={setBleedAmount}

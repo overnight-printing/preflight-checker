@@ -11,6 +11,7 @@ export default function ControlPanel({
   maxScale = 300,
   showSafeLine,      // boolean
   bleedEnabled,      // boolean
+  sourceHasBleed = false,
   onBleedToggle,     // function
   bleedAmount,       // number in PDF points
   onBleedAmountChange,
@@ -285,7 +286,14 @@ export default function ControlPanel({
         {/* Mirror Bleed Toggle */}
         <div className="toggle-item" style={{ borderLeft: bleedEnabled ? '3px solid var(--accent)' : '1px solid var(--border-color)' }}>
           <div className="toggle-info">
-            <h5 style={{ color: bleedEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Add Mirror Bleed</h5>
+            <h5 style={{ color: bleedEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+              {sourceHasBleed ? 'Mirror Bleed Included' : 'Add Mirror Bleed'}
+            </h5>
+            {sourceHasBleed && (
+              <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
+                Existing PDF bleed will be preserved.
+              </p>
+            )}
             <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
               {bleedInches.toFixed(3)}" on each edge
             </p>
@@ -300,7 +308,7 @@ export default function ControlPanel({
           </label>
         </div>
 
-        {bleedEnabled && (
+        {bleedEnabled && !sourceHasBleed && (
           <div style={{
             marginTop: '8px',
             padding: '12px',
