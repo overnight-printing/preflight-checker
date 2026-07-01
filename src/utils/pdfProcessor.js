@@ -648,6 +648,10 @@ export async function stitchBugToPDF(
     const embeddedArrOutput = await outputDoc.embedPdf(bugDocObj, [0]);
     embeddedBugPageForOutput = embeddedArrOutput[0];
   }
+
+  if (bugEnabled && pagesToStitch.length > 0 && !embeddedBugPageForOutput) {
+    throw new Error('Union Bug PDF could not be embedded in the expanded PDF output.');
+  }
   
   for (let i = 0; i < pages.length; i++) {
     const pageNum = i + 1;
@@ -688,19 +692,20 @@ export async function stitchBugToPDF(
     const newHeight = origHeight + (bleedAmount * 2);
     
     const preserveOriginalContent = manualCropAmount === 0 && !isCropMode;
-    let newPage;
+    const newPage = outputDoc.addPage([newWidth, newHeight]);
 
-    if (preserveOriginalContent) {
-      const [copiedPage] = await outputDoc.copyPages(pdfDoc, [i]);
-      newPage = copiedPage;
-      outputDoc.addPage(newPage);
-      newPage.translateContent(bleedAmount - activeBaseBox.x, bleedAmount - activeBaseBox.y);
-      newPage.contentStream = undefined;
-      newPage.contentStreamRef = undefined;
-    } else {
-      newPage = outputDoc.addPage([newWidth, newHeight]);
-    }
-    
+    // Set professional prepress boxes for printing before drawing content.
+    newPage.setMediaBox(0, 0, newWidth, newHeight);
+    newPage.setCropBox(0, 0, newWidth, newHeight);
+    newPage.setBleedBox(0, 0, newWidth, newHeight);
+
+    // Position the TrimBox precisely.
+    // The TrimBox in the NEW page is always located at the bleed offset
+    // because the processed artwork is centered on the expanded page.
+    const newTrimX = bleedAmount;
+    const newTrimY = bleedAmount;
+    newPage.setTrimBox(newTrimX, newTrimY, origWidth, origHeight);
+
     // Render PDF page to a high-DPI canvas
     const pdfjsPage = await pdfjsDoc.getPage(pageNum);
     const renderScale = 3.5; // High definition print resolution
@@ -758,6 +763,12 @@ export async function stitchBugToPDF(
           renderScale
         );
       }
+
+      const [embeddedOriginalPage] = await outputDoc.embedPdf(pdfDoc, [i]);
+      newPage.drawPage(embeddedOriginalPage, {
+        x: bleedAmount - activeBaseBox.x,
+        y: bleedAmount - activeBaseBox.y
+      });
     } else {
       const highResCanvas = document.createElement('canvas');
       highResCanvas.width = Math.round((origWidth + (bleedAmount * 2)) * renderScale);
@@ -779,30 +790,7 @@ export async function stitchBugToPDF(
       });
     }
 
-    if (preserveOriginalContent) {
-      const contents = newPage.node.normalizedEntries().Contents;
-      const backgroundStreamRef = newPage.contentStreamRef;
-      const backgroundStreamIndex = contents?.indexOf(backgroundStreamRef);
-
-      if (backgroundStreamIndex !== undefined) {
-        contents.remove(backgroundStreamIndex);
-        contents.insert(0, backgroundStreamRef);
-      }
-    }
-
-    // Set professional prepress boxes for printing
-    newPage.setMediaBox(0, 0, newWidth, newHeight);
-    newPage.setCropBox(0, 0, newWidth, newHeight);
-    newPage.setBleedBox(0, 0, newWidth, newHeight);
-    
-    // Position the TrimBox precisely.
-    // The TrimBox in the NEW page is always located at the bleed offset 
-    // because the processed artwork is centered on the expanded page.
-    const newTrimX = bleedAmount;
-    const newTrimY = bleedAmount;
-    newPage.setTrimBox(newTrimX, newTrimY, origWidth, origHeight);
-
-    // Overlay the vector Union Bug if enabled and targeted for this page
+    // Overlay the vector Union Bug last so expanded bleed/crop output cannot cover it.
     if (bugEnabled && embeddedBugPageForOutput && pagesToStitch.includes(pageNum)) {
       const activePos = pagePositions[pageNum] || position;
       const activeSize = pageSizes[pageNum] || bugSize;
