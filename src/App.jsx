@@ -1027,8 +1027,11 @@ export default function App() {
                       finalTrimW = Math.max(1, finalTrimW);
                       finalTrimH = Math.max(1, finalTrimH);
 
-                      let finalCanvasW = finalTrimW;
-                      let finalCanvasH = finalTrimH;
+                      const outputBaseBox = bleedEnabled && !trimCropEnabled
+                        ? pdfBoxInfo.cropBox
+                        : baseBox;
+                      let finalCanvasW = Math.max(1, outputBaseBox.width - (manualInset * 2));
+                      let finalCanvasH = Math.max(1, outputBaseBox.height - (manualInset * 2));
                       let bleedLabel = 'None';
 
                       if (bleedEnabled) {

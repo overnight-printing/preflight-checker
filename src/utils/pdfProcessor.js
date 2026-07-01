@@ -1,5 +1,17 @@
 import * as pdfjsLib from 'pdfjs-dist';
-import { PDFDocument, PDFName, PDFRawStream, PDFArray } from 'pdf-lib';
+import {
+  PDFDocument,
+  PDFName,
+  PDFRawStream,
+  PDFArray,
+  pushGraphicsState,
+  popGraphicsState,
+  rectangle,
+  clip,
+  endPath,
+  concatTransformationMatrix,
+  drawObject
+} from 'pdf-lib';
 import { decodePDFRawStream } from 'pdf-lib/es/core/streams/decode.js';
 
 // Set up the PDF.js worker from jsDelivr CDN
@@ -49,19 +61,6 @@ function getUsableTrimBox(cropBox, trimBox) {
     trimBox,
     inferred: false
   };
-}
-
-function boxContainsBleed(cropBox, trimBox, bleedAmount) {
-  if (bleedAmount <= 0) return true;
-
-  const bleedInsets = {
-    left: trimBox.x - cropBox.x,
-    right: (cropBox.x + cropBox.width) - (trimBox.x + trimBox.width),
-    bottom: trimBox.y - cropBox.y,
-    top: (cropBox.y + cropBox.height) - (trimBox.y + trimBox.height)
-  };
-
-  return Object.values(bleedInsets).every((value) => value >= bleedAmount - 0.01);
 }
 
 /**
@@ -292,74 +291,76 @@ export function drawMirrorBleed(ctx, orig, W, H, B) {
   ctx.restore();
 }
 
-async function drawMirrorBleedStripsToPDF(pdfDoc, page, baseCanvas, widthPt, heightPt, bleedPt, scale) {
-  const widthPx = Math.round(widthPt * scale);
-  const heightPx = Math.round(heightPt * scale);
-  const bleedPx = Math.round(bleedPt * scale);
+function drawClippedPageXObject(page, xObjectKey, clipRect, matrix) {
+  page.pushOperators(
+    pushGraphicsState(),
+    rectangle(clipRect.x, clipRect.y, clipRect.width, clipRect.height),
+    clip(),
+    endPath(),
+    concatTransformationMatrix(...matrix),
+    drawObject(xObjectKey),
+    popGraphicsState()
+  );
+}
 
-  if (widthPx <= 0 || heightPx <= 0 || bleedPx <= 0) return;
+function drawVectorPDFPageWithMirrorBleed(page, embeddedPage, baseBox, bleedPt) {
+  const xObjectKey = page.node.newXObject('MirrorBleedPage', embeddedPage.ref);
+  const drawSource = (clipRect, matrix) => drawClippedPageXObject(page, xObjectKey, clipRect, matrix);
+  const { x: sourceX, y: sourceY, width: baseWidth, height: baseHeight } = baseBox;
 
-  const makeStrip = (canvasWidth, canvasHeight, draw) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(canvasWidth));
-    canvas.height = Math.max(1, Math.round(canvasHeight));
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    draw(ctx);
-    return canvas.toDataURL('image/png');
-  };
+  if (bleedPt <= 0) {
+    drawSource(
+      { x: 0, y: 0, width: baseWidth, height: baseHeight },
+      [1, 0, 0, 1, -sourceX, -sourceY]
+    );
+    return;
+  }
 
-  const drawPng = async (dataUrl, x, y, width, height) => {
-    const image = await pdfDoc.embedPng(dataUrl);
-    page.drawImage(image, { x, y, width, height });
-  };
+  // Draw only the extra outside bleed, reusing the original PDF page resources.
+  drawSource(
+    { x: 0, y: bleedPt, width: bleedPt, height: baseHeight },
+    [-1, 0, 0, 1, bleedPt + sourceX, bleedPt - sourceY]
+  );
 
-  await drawPng(makeStrip(bleedPx, heightPx, (ctx) => {
-    ctx.translate(bleedPx, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(baseCanvas, 0, 0, bleedPx, heightPx, 0, 0, bleedPx, heightPx);
-  }), 0, bleedPt, bleedPt, heightPt);
+  drawSource(
+    { x: bleedPt + baseWidth, y: bleedPt, width: bleedPt, height: baseHeight },
+    [-1, 0, 0, 1, bleedPt + (baseWidth * 2) + sourceX, bleedPt - sourceY]
+  );
 
-  await drawPng(makeStrip(bleedPx, heightPx, (ctx) => {
-    ctx.translate(bleedPx, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(baseCanvas, widthPx - bleedPx, 0, bleedPx, heightPx, 0, 0, bleedPx, heightPx);
-  }), bleedPt + widthPt, bleedPt, bleedPt, heightPt);
+  drawSource(
+    { x: bleedPt, y: bleedPt + baseHeight, width: baseWidth, height: bleedPt },
+    [1, 0, 0, -1, bleedPt - sourceX, bleedPt + (baseHeight * 2) + sourceY]
+  );
 
-  await drawPng(makeStrip(widthPx, bleedPx, (ctx) => {
-    ctx.translate(0, bleedPx);
-    ctx.scale(1, -1);
-    ctx.drawImage(baseCanvas, 0, 0, widthPx, bleedPx, 0, 0, widthPx, bleedPx);
-  }), bleedPt, bleedPt + heightPt, widthPt, bleedPt);
+  drawSource(
+    { x: bleedPt, y: 0, width: baseWidth, height: bleedPt },
+    [1, 0, 0, -1, bleedPt - sourceX, bleedPt + sourceY]
+  );
 
-  await drawPng(makeStrip(widthPx, bleedPx, (ctx) => {
-    ctx.translate(0, bleedPx);
-    ctx.scale(1, -1);
-    ctx.drawImage(baseCanvas, 0, heightPx - bleedPx, widthPx, bleedPx, 0, 0, widthPx, bleedPx);
-  }), bleedPt, 0, widthPt, bleedPt);
+  drawSource(
+    { x: 0, y: bleedPt + baseHeight, width: bleedPt, height: bleedPt },
+    [-1, 0, 0, -1, bleedPt + sourceX, bleedPt + (baseHeight * 2) + sourceY]
+  );
 
-  await drawPng(makeStrip(bleedPx, bleedPx, (ctx) => {
-    ctx.translate(bleedPx, bleedPx);
-    ctx.scale(-1, -1);
-    ctx.drawImage(baseCanvas, 0, 0, bleedPx, bleedPx, 0, 0, bleedPx, bleedPx);
-  }), 0, bleedPt + heightPt, bleedPt, bleedPt);
+  drawSource(
+    { x: bleedPt + baseWidth, y: bleedPt + baseHeight, width: bleedPt, height: bleedPt },
+    [-1, 0, 0, -1, bleedPt + (baseWidth * 2) + sourceX, bleedPt + (baseHeight * 2) + sourceY]
+  );
 
-  await drawPng(makeStrip(bleedPx, bleedPx, (ctx) => {
-    ctx.translate(bleedPx, bleedPx);
-    ctx.scale(-1, -1);
-    ctx.drawImage(baseCanvas, widthPx - bleedPx, 0, bleedPx, bleedPx, 0, 0, bleedPx, bleedPx);
-  }), bleedPt + widthPt, bleedPt + heightPt, bleedPt, bleedPt);
+  drawSource(
+    { x: 0, y: 0, width: bleedPt, height: bleedPt },
+    [-1, 0, 0, -1, bleedPt + sourceX, bleedPt + sourceY]
+  );
 
-  await drawPng(makeStrip(bleedPx, bleedPx, (ctx) => {
-    ctx.translate(bleedPx, bleedPx);
-    ctx.scale(-1, -1);
-    ctx.drawImage(baseCanvas, 0, heightPx - bleedPx, bleedPx, bleedPx, 0, 0, bleedPx, bleedPx);
-  }), 0, 0, bleedPt, bleedPt);
+  drawSource(
+    { x: bleedPt + baseWidth, y: 0, width: bleedPt, height: bleedPt },
+    [-1, 0, 0, -1, bleedPt + (baseWidth * 2) + sourceX, bleedPt + sourceY]
+  );
 
-  await drawPng(makeStrip(bleedPx, bleedPx, (ctx) => {
-    ctx.translate(bleedPx, bleedPx);
-    ctx.scale(-1, -1);
-    ctx.drawImage(baseCanvas, widthPx - bleedPx, heightPx - bleedPx, bleedPx, bleedPx, 0, 0, bleedPx, bleedPx);
-  }), bleedPt + widthPt, 0, bleedPt, bleedPt);
+  drawSource(
+    { x: bleedPt, y: bleedPt, width: baseWidth, height: baseHeight },
+    [1, 0, 0, 1, bleedPt - sourceX, bleedPt - sourceY]
+  );
 }
 
 async function renderBasePageCanvas(
@@ -728,6 +729,11 @@ export async function stitchBugToPDF(
   if (bugEnabled && pagesToStitch.length > 0 && !embeddedBugPageForOutput) {
     throw new Error('Union Bug PDF could not be embedded in the expanded PDF output.');
   }
+
+  const embeddedOriginalPages = await outputDoc.embedPdf(
+    originalBytes,
+    pages.map((_, pageIndex) => pageIndex)
+  );
   
   for (let i = 0; i < pages.length; i++) {
     const pageNum = i + 1;
@@ -738,10 +744,10 @@ export async function stitchBugToPDF(
     const rawTrimBox = originalPage.getTrimBox() || cropBox;
     const { trimBox, inferred: hasInferredTrimBox } = getUsableTrimBox(cropBox, rawTrimBox);
     
-    // Mirror bleed must be built from the true trim/cut area. If metadata is
-    // missing but the page size looks like trim plus 0.125" bleed, use the
-    // inferred trim instead of treating the whole page as the finished size.
-    const useTrimBase = trimCropEnabled || bleedAmount > 0 || hasInferredTrimBox;
+    // When adding bleed to a print-ready PDF, treat the current visible PDF box
+    // as the source artwork and add the requested bleed outside it. The TrimBox
+    // still tracks the finished cut size inside that source artwork.
+    const useTrimBase = trimCropEnabled || (hasInferredTrimBox && bleedAmount === 0);
     const activeBaseBox = useTrimBase ? trimBox : cropBox;
     
     let origWidth = activeBaseBox.width;
@@ -775,10 +781,7 @@ export async function stitchBugToPDF(
     let newPage;
 
     if (preserveOriginalContent) {
-      const [copiedPage] = await outputDoc.copyPages(pdfDoc, [i]);
-      newPage = copiedPage;
-      outputDoc.addPage(newPage);
-      newPage.translateContent(bleedAmount - activeBaseBox.x, bleedAmount - activeBaseBox.y);
+      newPage = outputDoc.addPage([newWidth, newHeight]);
     } else {
       newPage = outputDoc.addPage([newWidth, newHeight]);
     }
@@ -788,40 +791,21 @@ export async function stitchBugToPDF(
     newPage.setCropBox(0, 0, newWidth, newHeight);
     newPage.setBleedBox(0, 0, newWidth, newHeight);
 
-    // Position the TrimBox precisely.
-    // The TrimBox in the NEW page is always located at the bleed offset
-    // because the processed artwork is centered on the expanded page.
-    const newTrimX = bleedAmount;
-    const newTrimY = bleedAmount;
-    newPage.setTrimBox(newTrimX, newTrimY, origWidth, origHeight);
+    const trimOffsetX = trimCropEnabled ? 0 : trimBox.x - activeBaseBox.x;
+    const trimOffsetY = trimCropEnabled ? 0 : trimBox.y - activeBaseBox.y;
+    newPage.setTrimBox(
+      bleedAmount + trimOffsetX,
+      bleedAmount + trimOffsetY,
+      trimCropEnabled ? origWidth : trimBox.width,
+      trimCropEnabled ? origHeight : trimBox.height
+    );
 
-    const sourceBleedAlreadyCoversOutput = preserveOriginalContent
-      && boxContainsBleed(cropBox, activeBaseBox, bleedAmount)
-      && Math.abs(newWidth - cropBox.width) < 0.01
-      && Math.abs(newHeight - cropBox.height) < 0.01;
-
-    if (preserveOriginalContent && !sourceBleedAlreadyCoversOutput) {
-      const { tempCanvasBase, renderScale } = await renderBasePageCanvas(
-        await getPdfJsDoc(),
-        pageNum,
-        origWidth,
-        origHeight,
-        trimCropEnabled,
-        trimBox,
-        cropBox,
-        manualCropAmount,
-        isCropMode,
-        manualCropGuides,
-        canvasScale
-      );
-      await drawMirrorBleedStripsToPDF(
-        outputDoc,
+    if (preserveOriginalContent) {
+      drawVectorPDFPageWithMirrorBleed(
         newPage,
-        tempCanvasBase,
-        origWidth,
-        origHeight,
-        bleedAmount,
-        renderScale
+        embeddedOriginalPages[i],
+        activeBaseBox,
+        bleedAmount
       );
     } else {
       const { tempCanvasBase, renderScale } = await renderBasePageCanvas(
