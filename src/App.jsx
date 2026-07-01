@@ -848,13 +848,18 @@ export default function App() {
     
     try {
       const safeFilename = artworkFile.name.replace(/\.[^/.]+$/, "") + (bugEnabled ? '_Proof' : '_Fixed');
-      const activeBleedAmount = artworkType === 'pdf' ? effectiveBleedAmount : (bleedEnabled ? bleedAmount : 0);
 
       if (bugEnabled && !bugFile) {
         throw new Error('Union Bug PDF is not loaded. Upload a Union Bug PDF or reload the app before saving.');
       }
       
       if (artworkType === 'pdf') {
+        const exportBoxInfo = pdfBoxInfo?.pageNum === currentPage
+          ? pdfBoxInfo
+          : await getPDFBoxInfo(artworkFile, currentPage);
+        const exportHasIncludedBleed = Boolean(exportBoxInfo?.hasDistinctBleedBox);
+        const activeBleedAmount = bleedEnabled && !exportHasIncludedBleed ? bleedAmount : 0;
+
         if (artworkFile.size > LARGE_PDF_BROWSER_LIMIT_BYTES) {
           const sizeMb = Math.round(artworkFile.size / (1024 * 1024));
           throw new Error(
@@ -904,6 +909,7 @@ export default function App() {
         downloadFile(blob, `${safeFilename}.pdf`);
       } else {
         // Image export (pass bleed in pixels)
+        const activeBleedAmount = bleedEnabled ? bleedAmount : 0;
         const bleedPx = activeBleedAmount * canvasScale;
         const finalImageDataUrl = stitchBugToImage(
           artworkCanvas,
@@ -1029,11 +1035,7 @@ export default function App() {
                       let finalCanvasH = finalTrimH;
                       let bleedLabel = 'None';
 
-                      if (bleedEnabled) {
-                        finalCanvasW += bleedAmount * 2;
-                        finalCanvasH += bleedAmount * 2;
-                        bleedLabel = `${(bleedAmount / 72).toFixed(3)}" (Added)`;
-                      } else if (hasMetadataBleed) {
+                      if (hasMetadataBleed) {
                         const horizontalBleed = pdfBoxInfo.bleedInsets.left + pdfBoxInfo.bleedInsets.right;
                         const verticalBleed = pdfBoxInfo.bleedInsets.top + pdfBoxInfo.bleedInsets.bottom;
                         finalCanvasW += horizontalBleed;
@@ -1046,6 +1048,10 @@ export default function App() {
                         bleedLabel = uniformBleed
                           ? `${(bleedValues[0] / 72).toFixed(3)}" (Included)`
                           : 'Variable (Included)';
+                      } else if (bleedEnabled) {
+                        finalCanvasW += bleedAmount * 2;
+                        finalCanvasH += bleedAmount * 2;
+                        bleedLabel = `${(bleedAmount / 72).toFixed(3)}" (Added)`;
                       }
 
                       return (
