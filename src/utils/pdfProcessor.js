@@ -338,6 +338,53 @@ async function drawVectorMirrorBleedStripsToPDF(pdfDoc, page, sourcePage, baseBo
   page.drawPage(bottomRight, { x: bleedPt + widthPt + bleedPt, y: bleedPt, xScale: -1, yScale: -1 });
 }
 
+async function renderBasePageCanvas(
+  pdfjsDoc,
+  pageNum,
+  widthPt,
+  heightPt,
+  trimCropEnabled,
+  trimBox,
+  cropBox,
+  manualCropAmount,
+  isCropMode,
+  manualCropGuides,
+  canvasScale
+) {
+  const pdfjsPage = await pdfjsDoc.getPage(pageNum);
+  const renderScale = 3.5; // High definition print resolution
+  const viewport = pdfjsPage.getViewport({ scale: renderScale });
+
+  const tempCanvasFull = document.createElement('canvas');
+  tempCanvasFull.width = Math.round(viewport.width);
+  tempCanvasFull.height = Math.round(viewport.height);
+  await pdfjsPage.render({
+    canvasContext: tempCanvasFull.getContext('2d', { willReadFrequently: true }),
+    viewport
+  }).promise;
+
+  const tempCanvasBase = document.createElement('canvas');
+  tempCanvasBase.width = Math.round(widthPt * renderScale);
+  tempCanvasBase.height = Math.round(heightPt * renderScale);
+  const tcbCtx = tempCanvasBase.getContext('2d', { willReadFrequently: true });
+
+  let offsetX = ((trimCropEnabled ? (trimBox.x - cropBox.x) : 0) + manualCropAmount) * renderScale;
+  let offsetY = ((trimCropEnabled ? (cropBox.height - (trimBox.y - cropBox.y + trimBox.height)) : 0) + manualCropAmount) * renderScale;
+
+  if (isCropMode && manualCropGuides) {
+    offsetX += (manualCropGuides.left / canvasScale) * renderScale;
+    offsetY += (manualCropGuides.top / canvasScale) * renderScale;
+  }
+
+  tcbCtx.drawImage(
+    tempCanvasFull,
+    Math.round(offsetX), Math.round(offsetY), Math.round(widthPt * renderScale), Math.round(heightPt * renderScale),
+    0, 0, Math.round(widthPt * renderScale), Math.round(heightPt * renderScale)
+  );
+
+  return { tempCanvasBase, renderScale };
+}
+
 function canvasRectToPdfRect(position, size, canvasScale, pdfHeight, originX = 0, originY = 0) {
   return {
     x: originX + (position.left / canvasScale),
@@ -692,7 +739,16 @@ export async function stitchBugToPDF(
     const newHeight = origHeight + (bleedAmount * 2);
     
     const preserveOriginalContent = manualCropAmount === 0 && !isCropMode;
-    const newPage = outputDoc.addPage([newWidth, newHeight]);
+    let newPage;
+
+    if (preserveOriginalContent) {
+      const [copiedPage] = await outputDoc.copyPages(pdfDoc, [i]);
+      newPage = copiedPage;
+      outputDoc.addPage(newPage);
+      newPage.translateContent(bleedAmount - activeBaseBox.x, bleedAmount - activeBaseBox.y);
+    } else {
+      newPage = outputDoc.addPage([newWidth, newHeight]);
+    }
 
     // Set professional prepress boxes for printing before drawing content.
     newPage.setMediaBox(0, 0, newWidth, newHeight);
@@ -706,40 +762,6 @@ export async function stitchBugToPDF(
     const newTrimY = bleedAmount;
     newPage.setTrimBox(newTrimX, newTrimY, origWidth, origHeight);
 
-    // Render PDF page to a high-DPI canvas
-    const pdfjsPage = await pdfjsDoc.getPage(pageNum);
-    const renderScale = 3.5; // High definition print resolution
-    const viewport = pdfjsPage.getViewport({ scale: renderScale });
-    
-    // Render original vector page to a temp canvas
-    const tempCanvasFull = document.createElement('canvas');
-    tempCanvasFull.width = Math.round(viewport.width);
-    tempCanvasFull.height = Math.round(viewport.height);
-    await pdfjsPage.render({
-      canvasContext: tempCanvasFull.getContext('2d', { willReadFrequently: true }),
-      viewport
-    }).promise;
-
-    // If cropped, we need just the TrimBox portion from the full render
-    const tempCanvasBase = document.createElement('canvas');
-    tempCanvasBase.width = Math.round(origWidth * renderScale);
-    tempCanvasBase.height = Math.round(origHeight * renderScale);
-    const tcbCtx = tempCanvasBase.getContext('2d', { willReadFrequently: true });
-    
-    let offsetX = ((trimCropEnabled ? (trimBox.x - cropBox.x) : 0) + manualCropAmount) * renderScale;
-    let offsetY = ((trimCropEnabled ? (cropBox.height - (trimBox.y - cropBox.y + trimBox.height)) : 0) + manualCropAmount) * renderScale;
-    
-    if (isCropMode && manualCropGuides) {
-      offsetX += (manualCropGuides.left / canvasScale) * renderScale;
-      offsetY += (manualCropGuides.top / canvasScale) * renderScale;
-    }
-
-    tcbCtx.drawImage(
-      tempCanvasFull,
-      Math.round(offsetX), Math.round(offsetY), Math.round(origWidth * renderScale), Math.round(origHeight * renderScale),
-      0, 0, Math.round(origWidth * renderScale), Math.round(origHeight * renderScale)
-    );
-    
     if (preserveOriginalContent) {
       try {
         await drawVectorMirrorBleedStripsToPDF(
@@ -753,6 +775,19 @@ export async function stitchBugToPDF(
         );
       } catch (error) {
         console.warn('Vector mirror bleed failed; falling back to raster strips.', error);
+        const { tempCanvasBase, renderScale } = await renderBasePageCanvas(
+          pdfjsDoc,
+          pageNum,
+          origWidth,
+          origHeight,
+          trimCropEnabled,
+          trimBox,
+          cropBox,
+          manualCropAmount,
+          isCropMode,
+          manualCropGuides,
+          canvasScale
+        );
         await drawMirrorBleedStripsToPDF(
           outputDoc,
           newPage,
@@ -763,13 +798,20 @@ export async function stitchBugToPDF(
           renderScale
         );
       }
-
-      const [embeddedOriginalPage] = await outputDoc.embedPdf(pdfDoc, [i]);
-      newPage.drawPage(embeddedOriginalPage, {
-        x: bleedAmount - activeBaseBox.x,
-        y: bleedAmount - activeBaseBox.y
-      });
     } else {
+      const { tempCanvasBase, renderScale } = await renderBasePageCanvas(
+        pdfjsDoc,
+        pageNum,
+        origWidth,
+        origHeight,
+        trimCropEnabled,
+        trimBox,
+        cropBox,
+        manualCropAmount,
+        isCropMode,
+        manualCropGuides,
+        canvasScale
+      );
       const highResCanvas = document.createElement('canvas');
       highResCanvas.width = Math.round((origWidth + (bleedAmount * 2)) * renderScale);
       highResCanvas.height = Math.round((origHeight + (bleedAmount * 2)) * renderScale);
