@@ -92,7 +92,7 @@ export default function EditorCanvas({
   }, [gridSizePx, snapToGrid]);
 
   // Compute dynamic top/bottom paddings for layout and zoom calculations
-  const topPadding = pdfBoxInfo ? 130 : 40;
+  const topPadding = pdfBoxInfo ? 58 : 40;
   let bottomPadding = 40;
   if (totalPages > 1) {
     bottomPadding = isPageSelectorExpanded ? 300 : 140;

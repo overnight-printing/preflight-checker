@@ -741,47 +741,96 @@ input:checked + .slider-switch:before {
   color: var(--text-primary);
 }
 
-/* Premium Glassmorphic PDF Geometry Dashboard Card */
+/* Compact PDF Geometry Summary */
 .pdf-geometry-info-card {
   position: absolute;
-  top: 16px;
+  top: 12px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 10;
-  width: 95%;
-  max-width: 1000px;
+  width: min(94%, 1040px);
   background: var(--bg-geometry-card);
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(18px);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
-  padding: 16px 24px;
+  border-radius: 8px;
+  padding: 4px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   box-shadow: var(--shadow-md);
   animation: fadeIn 0.3s ease-out;
 }
 
-.info-badge-title {
+.geometry-summary-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
+  gap: 12px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  text-align: left;
+}
+
+.geometry-summary-bar:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.geometry-summary-bar span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
 }
 
-.info-grid {
+.geometry-summary-bar strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.geometry-summary-bar svg:first-child {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.geometry-chevron {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+}
+
+.pdf-geometry-info-card.expanded .geometry-chevron {
+  transform: rotate(180deg);
+}
+
+.geometry-detail-panel {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
+  gap: 8px;
   width: 100%;
+  padding: 4px;
 }
 
 @media (max-width: 768px) {
-  .info-grid {
+  .geometry-summary-bar {
+    gap: 8px;
+    overflow-x: auto;
+  }
+
+  .geometry-detail-panel {
     grid-template-columns: repeat(2, 1fr);
   }
 }
@@ -794,6 +843,28 @@ input:checked + .slider-switch:before {
   border: 1px solid var(--border-color);
   padding: 10px 14px;
   border-radius: 8px;
+}
+
+.trim-info {
+  border-left: 3px solid #0055ff;
+}
+
+.trim-info .info-label,
+.trim-info .info-val {
+  color: #0055ff;
+}
+
+.bleed-info {
+  border-left: 3px solid #ff007f;
+}
+
+.bleed-info .info-label {
+  color: #ff007f;
+}
+
+.page-info {
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .info-label {

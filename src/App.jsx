@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { FileText, Image as ImageIcon, Sparkles, ClipboardCheck, Sun, Moon, Monitor, UploadCloud } from 'lucide-react';
+import { FileText, Image as ImageIcon, Sparkles, ClipboardCheck, Sun, Moon, Monitor, UploadCloud, Info, ChevronDown } from 'lucide-react';
 import UploadZone from './components/UploadZone';
 import EditorCanvas from './components/EditorCanvas';
 import ControlPanel from './components/ControlPanel';
@@ -172,6 +172,7 @@ export default function App() {
 
   // Collapsible page thumbnails strip state
   const [isThumbnailsExpanded, setIsThumbnailsExpanded] = useState(false);
+  const [isGeometryExpanded, setIsGeometryExpanded] = useState(false);
 
   // Safe zone is ALWAYS 9pt (0.125") inside the trim/cut line — hardcoded, not adjustable
   const pdfHasIncludedBleed = artworkType === 'pdf' && Boolean(pdfBoxInfo?.hasDistinctBleedBox);
@@ -186,6 +187,64 @@ export default function App() {
     const hMm = (height * 0.352778).toFixed(1);
     return `${wInch}" x ${hInch}" (${wMm} x ${hMm} mm)`;
   };
+
+  const geometryDetails = pdfBoxInfo ? (() => {
+    // Professional PDF page boxes describe the intended physical product
+    // independently of render/crop controls. Prefer explicit boxes only when
+    // they are genuinely distinct; crop guides are a fallback.
+    const hasMetadataTrim = pdfBoxInfo.hasDistinctTrimBox;
+    const hasMetadataBleed = hasMetadataTrim && pdfBoxInfo.hasDistinctBleedBox;
+    const baseBox = hasMetadataTrim ? pdfBoxInfo.trimBox : pdfBoxInfo.cropBox;
+    const manualInset = manualCropAmount || 0;
+
+    let finalTrimW = baseBox.width - (manualInset * 2);
+    let finalTrimH = baseBox.height - (manualInset * 2);
+
+    if (!hasMetadataTrim && isCropMode && manualCropGuides) {
+      const guideLeftPt = manualCropGuides.left / canvasScale;
+      const guideRightPt = manualCropGuides.right / canvasScale;
+      const guideTopPt = manualCropGuides.top / canvasScale;
+      const guideBottomPt = manualCropGuides.bottom / canvasScale;
+      finalTrimW -= (guideLeftPt + guideRightPt);
+      finalTrimH -= (guideTopPt + guideBottomPt);
+    }
+
+    finalTrimW = Math.max(1, finalTrimW);
+    finalTrimH = Math.max(1, finalTrimH);
+
+    const outputBaseBox = bleedEnabled && !trimCropEnabled
+      ? pdfBoxInfo.cropBox
+      : baseBox;
+    let finalCanvasW = Math.max(1, outputBaseBox.width - (manualInset * 2));
+    let finalCanvasH = Math.max(1, outputBaseBox.height - (manualInset * 2));
+    let bleedLabel = 'None';
+
+    if (bleedEnabled) {
+      finalCanvasW += bleedAmount * 2;
+      finalCanvasH += bleedAmount * 2;
+      bleedLabel = `${(bleedAmount / 72).toFixed(3)}" Output`;
+    } else if (hasMetadataBleed) {
+      const horizontalBleed = pdfBoxInfo.bleedInsets.left + pdfBoxInfo.bleedInsets.right;
+      const verticalBleed = pdfBoxInfo.bleedInsets.top + pdfBoxInfo.bleedInsets.bottom;
+      finalCanvasW += horizontalBleed;
+      finalCanvasH += verticalBleed;
+
+      const bleedValues = Object.values(pdfBoxInfo.bleedInsets);
+      const uniformBleed = bleedValues.every(
+        (value) => Math.abs(value - bleedValues[0]) < 0.01
+      );
+      bleedLabel = uniformBleed
+        ? `${(bleedValues[0] / 72).toFixed(3)}" Included`
+        : 'Variable Included';
+    }
+
+    return {
+      canvas: formatPtToPhysical(finalCanvasW, finalCanvasH),
+      trim: formatPtToPhysical(finalTrimW, finalTrimH),
+      bleed: bleedLabel,
+      page: `${currentPage} / ${totalPages}`
+    };
+  })() : null;
 
 
 
@@ -997,92 +1056,52 @@ export default function App() {
           <>
             {/* 1. Canvas Area */}
             <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
-              {/* PDF Geometry Specification Dashboard (Live Updates) */}
-              {pdfBoxInfo && (
-                <div className="pdf-geometry-info-card">
-                  <div className="info-grid">
-                    {(() => {
-                      // Professional PDF page boxes describe the intended
-                      // physical product independently of the render/crop
-                      // controls. Prefer them whenever they are genuinely
-                      // distinct; crop-mark guides are only a fallback for
-                      // files that do not contain a usable TrimBox.
-                      const hasMetadataTrim = pdfBoxInfo.hasDistinctTrimBox;
-                      const hasMetadataBleed = hasMetadataTrim && pdfBoxInfo.hasDistinctBleedBox;
-                      const baseBox = hasMetadataTrim ? pdfBoxInfo.trimBox : pdfBoxInfo.cropBox;
-                      const manualInset = manualCropAmount || 0;
+              {/* Compact PDF Geometry Summary */}
+              {geometryDetails && (
+                <div className={`pdf-geometry-info-card ${isGeometryExpanded ? 'expanded' : ''}`}>
+                  <button
+                    type="button"
+                    className="geometry-summary-bar"
+                    onClick={() => setIsGeometryExpanded((value) => !value)}
+                    aria-expanded={isGeometryExpanded}
+                    aria-label="Toggle PDF geometry details"
+                  >
+                    <Info size={14} />
+                    <span><strong>Canvas</strong> {geometryDetails.canvas}</span>
+                    <span><strong>Trim</strong> {geometryDetails.trim}</span>
+                    <span><strong>Bleed</strong> {geometryDetails.bleed}</span>
+                    <span><strong>Page</strong> {geometryDetails.page}</span>
+                    <ChevronDown size={15} className="geometry-chevron" />
+                  </button>
 
-                      let finalTrimW = baseBox.width - (manualInset * 2);
-                      let finalTrimH = baseBox.height - (manualInset * 2);
-
-                      if (!hasMetadataTrim && isCropMode && manualCropGuides) {
-                        const guideLeftPt = manualCropGuides.left / canvasScale;
-                        const guideRightPt = manualCropGuides.right / canvasScale;
-                        const guideTopPt = manualCropGuides.top / canvasScale;
-                        const guideBottomPt = manualCropGuides.bottom / canvasScale;
-                        finalTrimW -= (guideLeftPt + guideRightPt);
-                        finalTrimH -= (guideTopPt + guideBottomPt);
-                      }
-
-                      finalTrimW = Math.max(1, finalTrimW);
-                      finalTrimH = Math.max(1, finalTrimH);
-
-                      const outputBaseBox = bleedEnabled && !trimCropEnabled
-                        ? pdfBoxInfo.cropBox
-                        : baseBox;
-                      let finalCanvasW = Math.max(1, outputBaseBox.width - (manualInset * 2));
-                      let finalCanvasH = Math.max(1, outputBaseBox.height - (manualInset * 2));
-                      let bleedLabel = 'None';
-
-                      if (bleedEnabled) {
-                        finalCanvasW += bleedAmount * 2;
-                        finalCanvasH += bleedAmount * 2;
-                        bleedLabel = `${(bleedAmount / 72).toFixed(3)}" (Output)`;
-                      } else if (hasMetadataBleed) {
-                        const horizontalBleed = pdfBoxInfo.bleedInsets.left + pdfBoxInfo.bleedInsets.right;
-                        const verticalBleed = pdfBoxInfo.bleedInsets.top + pdfBoxInfo.bleedInsets.bottom;
-                        finalCanvasW += horizontalBleed;
-                        finalCanvasH += verticalBleed;
-
-                        const bleedValues = Object.values(pdfBoxInfo.bleedInsets);
-                        const uniformBleed = bleedValues.every(
-                          (value) => Math.abs(value - bleedValues[0]) < 0.01
-                        );
-                        bleedLabel = uniformBleed
-                          ? `${(bleedValues[0] / 72).toFixed(3)}" (Included)`
-                          : 'Variable (Included)';
-                      }
-
-                      return (
-                        <>
-                          <div className="info-item">
-                            <span className="info-label">Final Canvas (Crop)</span>
-                            <span className="info-val" title={formatPtToPhysical(finalCanvasW, finalCanvasH)}>
-                              {formatPtToPhysical(finalCanvasW, finalCanvasH)}
-                            </span>
-                          </div>
-                          <div className="info-item" style={{ borderLeft: '3px solid #0055ff' }}>
-                            <span className="info-label" style={{ color: '#0055ff' }}>Final Trim (Size)</span>
-                            <span className="info-val" style={{ color: '#0055ff', fontWeight: '700' }} title={formatPtToPhysical(finalTrimW, finalTrimH)}>
-                              {formatPtToPhysical(finalTrimW, finalTrimH)}
-                            </span>
-                          </div>
-                          <div className="info-item" style={{ borderLeft: '3px solid #ff007f' }}>
-                            <span className="info-label" style={{ color: '#ff007f' }}>Bleed Margin</span>
-                            <span className="info-val">
-                              {bleedLabel}
-                            </span>
-                          </div>
-                        </>
-                      );
-                    })()}
-                    <div className="info-item">
-                      <span className="info-label">Page</span>
-                      <span className="info-val" style={{ fontWeight: '700', color: 'var(--accent)' }}>
-                        {currentPage} / {totalPages} Page
-                      </span>
+                  {isGeometryExpanded && (
+                    <div className="geometry-detail-panel">
+                      <div className="info-item">
+                        <span className="info-label">Final Canvas (Crop)</span>
+                        <span className="info-val" title={geometryDetails.canvas}>
+                          {geometryDetails.canvas}
+                        </span>
+                      </div>
+                      <div className="info-item trim-info">
+                        <span className="info-label">Final Trim (Size)</span>
+                        <span className="info-val" title={geometryDetails.trim}>
+                          {geometryDetails.trim}
+                        </span>
+                      </div>
+                      <div className="info-item bleed-info">
+                        <span className="info-label">Bleed Margin</span>
+                        <span className="info-val">
+                          {geometryDetails.bleed}
+                        </span>
+                      </div>
+                      <div className="info-item">
+                        <span className="info-label">Page</span>
+                        <span className="info-val page-info">
+                          {geometryDetails.page} Page
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
 
