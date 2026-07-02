@@ -34,8 +34,8 @@
 
 .logo-section h1 {
   font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
+  font-weight: 800;
+  letter-spacing: 0;
   background: linear-gradient(135deg, var(--text-primary) 30%, var(--primary-hover) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -92,8 +92,8 @@
   font-size: 42px;
   line-height: 1.2;
   margin-bottom: 16px;
-  font-weight: 700;
-  letter-spacing: -1px;
+  font-weight: 800;
+  letter-spacing: 0;
 }
 
 .intro-panel p {
@@ -418,8 +418,9 @@
 }
 
 .slider-val {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   color: var(--primary-hover);
 }
 
@@ -576,8 +577,9 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 .color-picker-text {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
+  font-variant-numeric: tabular-nums;
   color: var(--text-primary);
   text-transform: uppercase;
 }
@@ -802,8 +804,9 @@ input:checked + .slider-switch:before {
 
 .info-val {
   font-size: 14px;
-  font-family: 'Outfit', sans-serif;
+  font-family: var(--font-sans);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
