@@ -745,31 +745,37 @@ input:checked + .slider-switch:before {
 .pdf-geometry-info-card {
   position: absolute;
   top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 14px;
   z-index: 10;
-  width: min(94%, 1040px);
+  width: auto;
+  max-width: min(520px, calc(100% - 28px));
   background: var(--bg-geometry-card);
   backdrop-filter: blur(18px);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 999px;
   padding: 4px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-sm);
   animation: fadeIn 0.3s ease-out;
+}
+
+.pdf-geometry-info-card.expanded {
+  width: min(420px, calc(100% - 28px));
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
 }
 
 .geometry-summary-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  min-height: 36px;
-  padding: 0 10px;
+  min-height: 30px;
+  padding: 0 9px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 999px;
   background: transparent;
   color: var(--text-primary);
   font-size: 12px;
@@ -787,7 +793,7 @@ input:checked + .slider-switch:before {
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
-  min-width: 0;
+  min-width: max-content;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -818,20 +824,22 @@ input:checked + .slider-switch:before {
 
 .geometry-detail-panel {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: 1fr;
   gap: 8px;
   width: 100%;
   padding: 4px;
 }
 
 @media (max-width: 768px) {
+  .pdf-geometry-info-card,
+  .pdf-geometry-info-card.expanded {
+    max-width: calc(100% - 20px);
+    left: 10px;
+  }
+
   .geometry-summary-bar {
     gap: 8px;
     overflow-x: auto;
-  }
-
-  .geometry-detail-panel {
-    grid-template-columns: repeat(2, 1fr);
   }
 }
 
