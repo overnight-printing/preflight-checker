@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: auto-version-main
+  cancel-in-progress: false
+
 jobs:
   bump-patch-version:
     if: github.actor != 'github-actions[bot]'
@@ -32,7 +36,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
           VERSION=$(node -p "require('./package.json').version")
           git add package.json package-lock.json
           git commit -m "chore: bump version to v${VERSION}"
-          git push origin main
+          git push origin main || {
+            git pull --rebase origin main
+            git push origin main
+          }
