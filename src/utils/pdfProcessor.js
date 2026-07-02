@@ -17,8 +17,6 @@ import { decodePDFRawStream } from 'pdf-lib/es/core/streams/decode.js';
 // Set up the PDF.js worker from jsDelivr CDN
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
-const STANDARD_BLEED_PT = 9.0;
-
 function boxesDiffer(a, b) {
   return (
     Math.abs(a.x - b.x) > 0.01 ||
@@ -28,32 +26,11 @@ function boxesDiffer(a, b) {
   );
 }
 
-function looksLikeBleedIncludedDimension(valuePt) {
-  const trimPt = valuePt - (STANDARD_BLEED_PT * 2);
-  if (trimPt <= 0) return false;
-  return Math.abs((trimPt / 18) - Math.round(trimPt / 18)) < 0.01;
-}
-
 function getUsableTrimBox(cropBox, trimBox) {
   if (boxesDiffer(trimBox, cropBox)) {
     return {
       trimBox,
       inferred: false
-    };
-  }
-
-  if (
-    looksLikeBleedIncludedDimension(cropBox.width) &&
-    looksLikeBleedIncludedDimension(cropBox.height)
-  ) {
-    return {
-      trimBox: {
-        x: cropBox.x + STANDARD_BLEED_PT,
-        y: cropBox.y + STANDARD_BLEED_PT,
-        width: cropBox.width - (STANDARD_BLEED_PT * 2),
-        height: cropBox.height - (STANDARD_BLEED_PT * 2)
-      },
-      inferred: true
     };
   }
 
