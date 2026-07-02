@@ -1251,10 +1251,6 @@ export default function App() {
                   onFix={handlePreflightFix}
                   onReset={handleResetArtwork}
                   artworkType={artworkType}
-                  pdfBoxInfo={pdfBoxInfo}
-                  currentPage={currentPage}
-                  totalPages={totalPages}
-                  isExporting={isLoading || isScanning || isExporting}
                 />
               )}
 
@@ -1287,9 +1283,6 @@ export default function App() {
                     </>
                   )}
                 </button>
-                <p style={{ fontSize: '10.5px', color: 'var(--text-secondary)', textAlign: 'center', marginTop: '8px' }}>
-                  * {bugEnabled ? '' : ''}All preflight fixes applied.
-                </p>
               </div>
 
               {/* Collapsible Advanced Settings for Stamp File Change */}

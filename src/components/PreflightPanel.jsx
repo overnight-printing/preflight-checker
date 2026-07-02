@@ -13,10 +13,7 @@ export default function PreflightPanel({
   onRunFullCheck,
   onFix,
   onReset,
-  artworkType,
-  pdfBoxInfo,
-  currentPage,
-  totalPages
+  artworkType
 }) {
 
   if (artworkType !== 'pdf') {
@@ -67,38 +64,6 @@ export default function PreflightPanel({
           >
             Reset Artwork
           </button>
-        </div>
-
-        <div style={{
-          background: 'rgba(255,255,255,0.02)',
-          border: '1px solid var(--border-color)',
-          borderRadius: '12px',
-          padding: '14px 16px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <CheckCircle2 size={16} style={{ color: 'var(--success)' }} />
-            <div>
-              <h5 style={{ fontSize: '14px', fontWeight: '600' }}>Basic PDF info loaded</h5>
-              <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: '1.4' }}>
-                Page preview, page count, size, TrimBox, and BleedBox are available without the heavy scan.
-              </p>
-            </div>
-          </div>
-
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: '8px',
-            fontSize: '12px'
-          }}>
-            <BasicInfoItem label="Page" value={`${currentPage || 1} / ${totalPages || 1}`} />
-            <BasicInfoItem label="TrimBox" value={pdfBoxInfo?.hasDistinctTrimBox ? 'Detected' : 'Fallback'} />
-            <BasicInfoItem label="BleedBox" value={pdfBoxInfo?.hasDistinctBleedBox ? 'Detected' : 'Not distinct'} />
-            <BasicInfoItem label="CropBox" value={pdfBoxInfo?.cropBox ? formatBoxSize(pdfBoxInfo.cropBox) : 'Loading'} />
-          </div>
         </div>
 
         <div className="sidebar-section" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -275,28 +240,6 @@ export default function PreflightPanel({
       </div>
     </div>
   );
-}
-
-function BasicInfoItem({ label, value }) {
-  return (
-    <div style={{
-      background: 'var(--bg-card)',
-      border: '1px solid var(--border-color)',
-      borderRadius: '8px',
-      padding: '8px 10px',
-      minWidth: 0
-    }}>
-      <div style={{ color: 'var(--text-secondary)', fontSize: '10.5px', fontWeight: '600' }}>{label}</div>
-      <div style={{ color: 'var(--text-primary)', fontSize: '12px', fontWeight: '700', marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function formatBoxSize(box) {
-  if (!box?.width || !box?.height) return 'N/A';
-  return `${(box.width / 72).toFixed(2)}" x ${(box.height / 72).toFixed(2)}"`;
 }
 
 function getCheckTitle(key) {
