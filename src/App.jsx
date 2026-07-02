@@ -1067,9 +1067,8 @@ export default function App() {
                     aria-label="Toggle PDF geometry details"
                   >
                     <Info size={14} />
-                    <span><strong>Trim</strong> {geometryDetails.trim}</span>
+                    <span><strong>Document</strong> {geometryDetails.trim}</span>
                     <span><strong>Bleed</strong> {geometryDetails.bleed}</span>
-                    <span><strong>Page</strong> {geometryDetails.page}</span>
                     <ChevronDown size={15} className="geometry-chevron" />
                   </button>
 

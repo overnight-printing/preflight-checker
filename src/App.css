@@ -748,7 +748,7 @@ input:checked + .slider-switch:before {
   left: 14px;
   z-index: 10;
   width: auto;
-  max-width: min(520px, calc(100% - 28px));
+  max-width: min(360px, calc(100% - 28px));
   background: var(--bg-geometry-card);
   backdrop-filter: blur(18px);
   border: 1px solid var(--border-color);
@@ -762,7 +762,7 @@ input:checked + .slider-switch:before {
 }
 
 .pdf-geometry-info-card.expanded {
-  width: min(420px, calc(100% - 28px));
+  width: min(340px, calc(100% - 28px));
   border-radius: 10px;
   box-shadow: var(--shadow-md);
 }
@@ -770,10 +770,10 @@ input:checked + .slider-switch:before {
 .geometry-summary-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   min-height: 30px;
-  padding: 0 9px;
+  padding: 0 8px;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -793,7 +793,7 @@ input:checked + .slider-switch:before {
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
-  min-width: max-content;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -825,7 +825,7 @@ input:checked + .slider-switch:before {
 .geometry-detail-panel {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 8px;
+  gap: 4px;
   width: 100%;
   padding: 4px;
 }
@@ -845,12 +845,15 @@ input:checked + .slider-switch:before {
 
 .info-item {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   background: var(--bg-input);
   border: 1px solid var(--border-color);
-  padding: 10px 14px;
-  border-radius: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  min-width: 0;
 }
 
 .trim-info {
@@ -876,16 +879,19 @@ input:checked + .slider-switch:before {
 }
 
 .info-label {
-  font-size: 12px;
+  flex: 0 0 auto;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
 }
 
 .info-val {
-  font-size: 14px;
+  min-width: 0;
+  font-size: 12px;
   font-family: var(--font-sans);
-  font-weight: 600;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
+  text-align: right;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
