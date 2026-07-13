@@ -284,6 +284,10 @@ function drawVectorPDFPageWithMirrorBleed(page, embeddedPage, baseBox, bleedPt) 
   const xObjectKey = page.node.newXObject('MirrorBleedPage', embeddedPage.ref);
   const drawSource = (clipRect, matrix) => drawClippedPageXObject(page, xObjectKey, clipRect, matrix);
   const { x: sourceX = 0, y: sourceY = 0, width: baseWidth, height: baseHeight } = baseBox;
+  const leftSourceX = Math.max(sourceX, 0);
+  const rightSourceX = Math.min(sourceX, 0);
+  const bottomSourceY = Math.max(sourceY, 0);
+  const topSourceY = Math.min(sourceY, 0);
 
   if (bleedPt <= 0) {
     drawSource(
@@ -296,42 +300,42 @@ function drawVectorPDFPageWithMirrorBleed(page, embeddedPage, baseBox, bleedPt) 
   // Draw only the extra outside bleed, reusing the original PDF page resources.
   drawSource(
     { x: 0, y: bleedPt, width: bleedPt, height: baseHeight },
-    [-1, 0, 0, 1, bleedPt + sourceX, bleedPt - sourceY]
+    [-1, 0, 0, 1, bleedPt + leftSourceX, bleedPt - sourceY]
   );
 
   drawSource(
     { x: bleedPt + baseWidth, y: bleedPt, width: bleedPt, height: baseHeight },
-    [-1, 0, 0, 1, bleedPt + (baseWidth * 2) + sourceX, bleedPt - sourceY]
+    [-1, 0, 0, 1, bleedPt + (baseWidth * 2) + rightSourceX, bleedPt - sourceY]
   );
 
   drawSource(
     { x: bleedPt, y: bleedPt + baseHeight, width: baseWidth, height: bleedPt },
-    [1, 0, 0, -1, bleedPt - sourceX, bleedPt + (baseHeight * 2) + sourceY]
+    [1, 0, 0, -1, bleedPt - sourceX, bleedPt + (baseHeight * 2) + topSourceY]
   );
 
   drawSource(
     { x: bleedPt, y: 0, width: baseWidth, height: bleedPt },
-    [1, 0, 0, -1, bleedPt - sourceX, bleedPt + sourceY]
+    [1, 0, 0, -1, bleedPt - sourceX, bleedPt + bottomSourceY]
   );
 
   drawSource(
     { x: 0, y: bleedPt + baseHeight, width: bleedPt, height: bleedPt },
-    [-1, 0, 0, -1, bleedPt + sourceX, bleedPt + (baseHeight * 2) + sourceY]
+    [-1, 0, 0, -1, bleedPt + leftSourceX, bleedPt + (baseHeight * 2) + topSourceY]
   );
 
   drawSource(
     { x: bleedPt + baseWidth, y: bleedPt + baseHeight, width: bleedPt, height: bleedPt },
-    [-1, 0, 0, -1, bleedPt + (baseWidth * 2) + sourceX, bleedPt + (baseHeight * 2) + sourceY]
+    [-1, 0, 0, -1, bleedPt + (baseWidth * 2) + rightSourceX, bleedPt + (baseHeight * 2) + topSourceY]
   );
 
   drawSource(
     { x: 0, y: 0, width: bleedPt, height: bleedPt },
-    [-1, 0, 0, -1, bleedPt + sourceX, bleedPt + sourceY]
+    [-1, 0, 0, -1, bleedPt + leftSourceX, bleedPt + bottomSourceY]
   );
 
   drawSource(
     { x: bleedPt + baseWidth, y: 0, width: bleedPt, height: bleedPt },
-    [-1, 0, 0, -1, bleedPt + (baseWidth * 2) + sourceX, bleedPt + sourceY]
+    [-1, 0, 0, -1, bleedPt + (baseWidth * 2) + rightSourceX, bleedPt + bottomSourceY]
   );
 
   drawSource(
@@ -779,8 +783,8 @@ export async function stitchBugToPDF(
 
     if (preserveOriginalContent) {
       const relativeBaseBox = {
-        x: activeBaseBox.x - cropBox.x,
-        y: activeBaseBox.y - cropBox.y,
+        x: activeBaseBox.x,
+        y: activeBaseBox.y,
         width: activeBaseBox.width,
         height: activeBaseBox.height
       };
