@@ -714,11 +714,6 @@ export async function stitchBugToPDF(
     throw new Error('Union Bug PDF could not be embedded in the expanded PDF output.');
   }
 
-  const embeddedOriginalPages = await outputDoc.embedPdf(
-    originalBytes,
-    pages.map((_, pageIndex) => pageIndex)
-  );
-  
   for (let i = 0; i < pages.length; i++) {
     const pageNum = i + 1;
     const originalPage = pages[i];
@@ -785,18 +780,23 @@ export async function stitchBugToPDF(
     );
 
     if (preserveOriginalContent) {
+      const embeddedOriginalPage = await outputDoc.embedPage(originalPage, {
+        left: activeBaseBox.x,
+        bottom: activeBaseBox.y,
+        right: activeBaseBox.x + activeBaseBox.width,
+        top: activeBaseBox.y + activeBaseBox.height
+      });
+
       const relativeBaseBox = {
-        x: activeBaseBox.x - cropBox.x,
-        y: activeBaseBox.y - cropBox.y,
+        x: 0,
+        y: 0,
         width: activeBaseBox.width,
-        height: activeBaseBox.height,
-        bottomSampleOffsetX: Math.max(cropBox.x, 0),
-        bottomSampleOffsetY: Math.max(cropBox.y, 0)
+        height: activeBaseBox.height
       };
 
       drawVectorPDFPageWithMirrorBleed(
         newPage,
-        embeddedOriginalPages[i],
+        embeddedOriginalPage,
         relativeBaseBox,
         bleedAmount
       );
