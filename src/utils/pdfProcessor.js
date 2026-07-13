@@ -283,7 +283,7 @@ function drawClippedPageXObject(page, xObjectKey, clipRect, matrix) {
 function drawVectorPDFPageWithMirrorBleed(page, embeddedPage, baseBox, bleedPt) {
   const xObjectKey = page.node.newXObject('MirrorBleedPage', embeddedPage.ref);
   const drawSource = (clipRect, matrix) => drawClippedPageXObject(page, xObjectKey, clipRect, matrix);
-  const { x: sourceX, y: sourceY, width: baseWidth, height: baseHeight } = baseBox;
+  const { x: sourceX = 0, y: sourceY = 0, width: baseWidth, height: baseHeight } = baseBox;
 
   if (bleedPt <= 0) {
     drawSource(
@@ -778,10 +778,17 @@ export async function stitchBugToPDF(
     );
 
     if (preserveOriginalContent) {
+      const relativeBaseBox = {
+        x: activeBaseBox.x - cropBox.x,
+        y: activeBaseBox.y - cropBox.y,
+        width: activeBaseBox.width,
+        height: activeBaseBox.height
+      };
+
       drawVectorPDFPageWithMirrorBleed(
         newPage,
         embeddedOriginalPages[i],
-        activeBaseBox,
+        relativeBaseBox,
         bleedAmount
       );
     } else {
