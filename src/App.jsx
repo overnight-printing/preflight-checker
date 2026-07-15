@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { FileText, Image as ImageIcon, Sparkles, ClipboardCheck, Sun, Moon, Monitor, UploadCloud, Info, ChevronDown } from 'lucide-react';
+import { Image as ImageIcon, Sparkles, ClipboardCheck, UploadCloud, Info, ChevronDown } from 'lucide-react';
 import UploadZone from './components/UploadZone';
 import EditorCanvas from './components/EditorCanvas';
 import ControlPanel from './components/ControlPanel';
@@ -177,6 +177,35 @@ export default function App() {
   // Safe zone is ALWAYS 9pt (0.125") inside the trim/cut line — hardcoded, not adjustable
   const pdfHasIncludedBleed = artworkType === 'pdf' && Boolean(pdfBoxInfo?.hasDistinctBleedBox);
   const effectiveBleedAmount = bleedEnabled ? bleedAmount : 0;
+
+  const translateBugForBleedChange = useCallback((previousBleed, nextBleed) => {
+    const deltaPx = (nextBleed - previousBleed) * canvasScale;
+    if (Math.abs(deltaPx) < 0.001) return;
+
+    const translatePosition = (position) => ({
+      left: Math.max(0, position.left + deltaPx),
+      top: Math.max(0, position.top + deltaPx)
+    });
+
+    setBugPosition((position) => translatePosition(position));
+    setPagePositions((positions) => Object.fromEntries(
+      Object.entries(positions).map(([page, position]) => [page, translatePosition(position)])
+    ));
+  }, [canvasScale]);
+
+  const setBleedEnabledPreservingBug = useCallback((enabled) => {
+    const previousBleed = bleedEnabled ? bleedAmount : 0;
+    const nextBleed = enabled ? bleedAmount : 0;
+    translateBugForBleedChange(previousBleed, nextBleed);
+    setBleedEnabled(enabled);
+  }, [bleedAmount, bleedEnabled, translateBugForBleedChange]);
+
+  const setBleedAmountPreservingBug = useCallback((amount) => {
+    const previousBleed = bleedEnabled ? bleedAmount : 0;
+    const nextBleed = bleedEnabled ? amount : 0;
+    translateBugForBleedChange(previousBleed, nextBleed);
+    setBleedAmount(amount);
+  }, [bleedAmount, bleedEnabled, translateBugForBleedChange]);
 
   // Utility to format PDF points (pt) into physical dimensions (inches & millimeters)
   const formatPtToPhysical = (width, height) => {
@@ -458,7 +487,7 @@ export default function App() {
       }
       
       // Reset common states
-      setBleedEnabled(false);
+      setBleedEnabledPreservingBug(false);
       setTrimCropEnabled(false);
       setManualCropAmount(0);
       setSourceHasBleed(extension === 'pdf');
@@ -732,7 +761,7 @@ export default function App() {
 
       if (checkKey === 'bleed') {
         // Fix Bleed: Enable mirror bleed in settings
-        setBleedEnabled(true);
+        setBleedEnabledPreservingBug(true);
         setSourceHasBleed(false);
         setIsLoading(false);
         return;
@@ -995,43 +1024,19 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Premium Glassmorphic Header */}
       <header className="app-header">
         <div className="logo-section" onClick={handleClearArtwork} style={{ cursor: 'pointer' }} title="Go to Homepage">
           <img src="/favicon.png" alt="Logo" style={{ height: '28px', width: '28px', borderRadius: '50%' }} className="logo-icon" />
           <h1>Overnight Preflight Tool</h1>
-          <span className="logo-badge">v{import.meta.env.VITE_APP_VERSION}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* Theme switcher */}
-          <div className="theme-switcher">
-            <button 
-              className={`theme-btn ${theme === 'light' ? 'active' : ''}`} 
-              onClick={() => setTheme('light')}
-              title="Light Mode"
-              style={{ padding: '6px' }}
-            >
-              <Sun size={14} />
-            </button>
-            <button 
-              className={`theme-btn ${theme === 'dark' ? 'active' : ''}`} 
-              onClick={() => setTheme('dark')}
-              title="Dark Mode"
-              style={{ padding: '6px' }}
-            >
-              <Moon size={14} />
-            </button>
-            <button 
-              className={`theme-btn ${theme === 'system' ? 'active' : ''}`} 
-              onClick={() => setTheme('system')}
-              title="System Default"
-            >
-              <Monitor size={14} />
-              <span>Auto</span>
-            </button>
-          </div>
-
-        </div>
+        <label className="theme-menu">
+          <span className="sr-only">Color theme</span>
+          <select value={theme} onChange={(event) => setTheme(event.target.value)}>
+            <option value="system">System theme</option>
+            <option value="light">Light theme</option>
+            <option value="dark">Dark theme</option>
+          </select>
+        </label>
       </header>
 
       {/* Main Workspace */}
@@ -1192,7 +1197,8 @@ export default function App() {
               </div>
 
               {/* Mini Upload Zone Cards in Sidebar for replacement */}
-              <div style={{ padding: '20px 24px 0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div className="document-utility">
+                <span className="document-utility-label">Document</span>
                 <UploadZone
                   label="Artwork File"
                   accept=".pdf,.png,.jpg,.jpeg"
@@ -1215,9 +1221,9 @@ export default function App() {
                   showSafeLine={showSafeLine}
                   bleedEnabled={bleedEnabled}
                   sourceHasBleed={pdfHasIncludedBleed}
-                  onBleedToggle={() => setBleedEnabled(!bleedEnabled)}
+                  onBleedToggle={() => setBleedEnabledPreservingBug(!bleedEnabled)}
                   bleedAmount={bleedAmount}
-                  onBleedAmountChange={setBleedAmount}
+                  onBleedAmountChange={setBleedAmountPreservingBug}
                   trimCropEnabled={trimCropEnabled}
                   onTrimCropToggle={() => setTrimCropEnabled(!trimCropEnabled)}
                   manualCropAmount={manualCropAmount}
@@ -1239,6 +1245,9 @@ export default function App() {
                   onShowSafeLineToggle={() => setShowSafeLine(!showSafeLine)}
                   onMultiPageOptionsChange={setMultiPageOptions}
                   onResetBug={resetUnionBugSettings}
+                  bugFile={bugFile}
+                  onBugSelect={handleBugSelect}
+                  onClearBug={handleClearBug}
                   isExporting={isExporting}
                 />
               ) : (
@@ -1253,19 +1262,17 @@ export default function App() {
               )}
 
               {/* Universal Persistent Export Button at bottom of sidebar */}
-              <div style={{ 
-                padding: '0 24px 24px', 
-                marginTop: 'auto',
-                borderTop: '1px solid var(--border-color)',
-                paddingTop: '20px',
-                background: 'var(--bg-card)',
-                position: 'sticky',
-                bottom: 0,
-                zIndex: 10
-              }}>
+              <div className="export-area">
+                <div className="export-heading">
+                  <strong>Export</strong>
+                  <span>Save the current output as a production file.</span>
+                </div>
                 <button
-                  className="btn btn-primary btn-action-block"
-                  style={{ padding: '14px', fontSize: '15px' }}
+                  className={`btn btn-action-block ${
+                    activeSidebarTab === 'stamper' || artworkType !== 'pdf' || preflightResults
+                      ? 'btn-primary'
+                      : 'btn-secondary'
+                  }`}
                   onClick={handleUniversalExport}
                   disabled={isLoading || isScanning || isExporting}
                 >
@@ -1283,24 +1290,6 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Collapsible Advanced Settings for Stamp File Change */}
-              <div className="advanced-settings-wrapper">
-                <details className="advanced-settings-details">
-                  <summary>
-                    Advanced Settings (Change Stamp PDF)
-                  </summary>
-                  <div style={{ marginTop: '12px' }}>
-                    <UploadZone
-                      label="Union Bug PDF"
-                      accept=".pdf"
-                      onFileSelect={handleBugSelect}
-                      selectedFile={bugFile}
-                      onClear={handleClearBug}
-                      icon={FileText}
-                    />
-                  </div>
-                </details>
-              </div>
             </aside>
           </>
         )}

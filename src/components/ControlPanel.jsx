@@ -1,25 +1,57 @@
 import { useState } from 'react';
-import { ShieldCheck, Check, AlignLeft, AlignCenter, AlignRight, RotateCcw } from 'lucide-react';
+import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  Check,
+  ChevronDown,
+  FileText,
+  RotateCcw,
+  ShieldCheck
+} from 'lucide-react';
+import UploadZone from './UploadZone';
+
+function WorkflowSection({ id, title, description, activeSection, onToggle, children }) {
+  const isOpen = activeSection === id;
+
+  return (
+    <section className={`workflow-section ${isOpen ? 'open' : ''}`}>
+      <button
+        type="button"
+        className="workflow-section-trigger"
+        onClick={() => onToggle(id)}
+        aria-expanded={isOpen}
+      >
+        <span>
+          <strong>{title}</strong>
+          {description && <small>{description}</small>}
+        </span>
+        <ChevronDown size={16} />
+      </button>
+      {isOpen && <div className="workflow-section-content">{children}</div>}
+    </section>
+  );
+}
 
 export default function ControlPanel({
-  colorMode,         // 'auto', 'black', 'white', 'custom'
-  selectedColor,     // hex string
-  extractedColors,   // array of hex strings
-  bugScale,          // 10 to 300
-  bugBaseSize,       // { width, height } in points
+  colorMode,
+  selectedColor,
+  extractedColors,
+  bugScale,
+  bugBaseSize,
   minScale = 10,
   maxScale = 300,
-  showSafeLine,      // boolean
-  bleedEnabled,      // boolean
+  showSafeLine,
+  bleedEnabled,
   sourceHasBleed = false,
-  onBleedToggle,     // function
-  bleedAmount,       // number in PDF points
+  onBleedToggle,
+  bleedAmount,
   onBleedAmountChange,
-  bugEnabled,        // boolean
-  onBugEnabledToggle,// function
-  onQuickAlign,      // function: (alignment: 'left' | 'center' | 'right') => void
-  multiPageOptions,  // { applyTo: 'current' | 'all' | 'custom', customPages: string }
-  isMultiPage,       // boolean
+  bugEnabled,
+  onBugEnabledToggle,
+  onQuickAlign,
+  multiPageOptions,
+  isMultiPage,
   onColorModeChange,
   onColorSelect,
   onScaleChange,
@@ -35,26 +67,25 @@ export default function ControlPanel({
   onSnapToGridToggle,
   gridSize,
   onGridSizeChange,
-  onResetBug
+  onResetBug,
+  bugFile,
+  onBugSelect,
+  onClearBug
 }) {
-
-  const getBugInchDimensions = () => {
-    if (!bugBaseSize || !bugBaseSize.width || !bugBaseSize.height) return '';
-    const widthInches = ((bugBaseSize.width * bugScale) / 100 / 72).toFixed(2);
-    const heightInches = ((bugBaseSize.height * bugScale) / 100 / 72).toFixed(2);
-    return `${widthInches}" x ${heightInches}"`;
-  };
-
-  const handleScaleChange = (e) => {
-    onScaleChange(parseInt(e.target.value, 10));
-  };
-
-  const handleCustomColorChange = (e) => {
-    onColorSelect(e.target.value);
-  };
-
+  const [activeSection, setActiveSection] = useState('bleed');
   const bleedInches = bleedAmount / 72;
   const [bleedInput, setBleedInput] = useState(bleedInches.toFixed(3));
+
+  const toggleSection = (section) => {
+    setActiveSection((current) => current === section ? '' : section);
+  };
+
+  const getBugInchDimensions = () => {
+    if (!bugBaseSize?.width || !bugBaseSize?.height) return '';
+    const width = ((bugBaseSize.width * bugScale) / 100 / 72).toFixed(2);
+    const height = ((bugBaseSize.height * bugScale) / 100 / 72).toFixed(2);
+    return `${width}" × ${height}"`;
+  };
 
   const commitBleedInput = () => {
     const inches = Number(bleedInput);
@@ -67,427 +98,284 @@ export default function ControlPanel({
   };
 
   return (
-    <div className="sidebar-content">
-      {/* 0. Toggle Bug Stamping Activity */}
-      <div className="sidebar-section">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-          <span className="section-title" style={{ marginBottom: 0 }}>Enable Union Bug</span>
-          <button 
-            className="btn btn-secondary" 
-            style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', borderStyle: 'dashed', display: 'flex', alignItems: 'center', gap: '5px' }}
-            onClick={onResetBug}
-            title="Reset all Union Bug settings"
-          >
-            <RotateCcw size={12} />
-            Reset Union Bug
-          </button>
-        </div>
-        <div className="toggle-item" style={{ borderLeft: bugEnabled ? '3px solid var(--primary)' : '1px solid var(--border-color)' }}>
-          <div className="toggle-info">
-            <h5 style={{ color: bugEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Apply Union Bug</h5>
+    <div className="sidebar-content workflow-sections">
+      <WorkflowSection
+        id="bleed"
+        title="Bleed & Trim"
+        description={bleedEnabled ? `${bleedInches.toFixed(3)}" mirror bleed` : 'Guides and output margins'}
+        activeSection={activeSection}
+        onToggle={toggleSection}
+      >
+        <div className="setting-row">
+          <div className="setting-copy">
+            <strong>{sourceHasBleed ? 'Preserve and extend bleed' : 'Add mirror bleed'}</strong>
+            <span>{sourceHasBleed ? 'Existing PDF bleed stays intact.' : 'Mirror artwork beyond each edge.'}</span>
           </div>
           <label className="switch">
-            <input
-              type="checkbox"
-              checked={bugEnabled}
-              onChange={onBugEnabledToggle}
-            />
-            <span className="slider-switch" />
-          </label>
-        </div>
-      </div>
-
-      {/* Conditionally render all Union Bug controls ONLY if Bug is enabled */}
-      {bugEnabled && (
-        <>
-          {/* 1. Quick Alignment Tools */}
-          <div className="sidebar-section">
-            <span className="section-title">Quick Align</span>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                className="btn btn-secondary"
-                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', padding: '10px 0', fontSize: '11px' }}
-                onClick={() => onQuickAlign('left')}
-              >
-                <AlignLeft size={16} />
-                Align Left
-              </button>
-              <button
-                className="btn btn-secondary"
-                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', padding: '10px 0', fontSize: '11px' }}
-                onClick={() => onQuickAlign('center')}
-              >
-                <AlignCenter size={16} />
-                Align Center
-              </button>
-              <button
-                className="btn btn-secondary"
-                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', padding: '10px 0', fontSize: '11px' }}
-                onClick={() => onQuickAlign('right')}
-              >
-                <AlignRight size={16} />
-                Align Right
-              </button>
-            </div>
-            
-          </div>
-
-          {/* 2. Placement Assist */}
-          <div className="sidebar-section">
-            <span className="section-title">Placement Assist</span>
-            <div className="toggle-item" style={{ borderLeft: showGrid ? '3px solid var(--accent)' : '1px solid var(--border-color)' }}>
-              <div className="toggle-info">
-                <h5 style={{ color: showGrid ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Show Grid</h5>
-              </div>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={showGrid}
-                  onChange={onShowGridToggle}
-                />
-                <span className="slider-switch" />
-              </label>
-            </div>
-
-            <div className="toggle-item" style={{ borderLeft: snapToGrid ? '3px solid var(--primary)' : '1px solid var(--border-color)' }}>
-              <div className="toggle-info">
-                <h5 style={{ color: snapToGrid ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Snap to Grid</h5>
-                <p>Applies while dragging only</p>
-              </div>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={snapToGrid}
-                  onChange={onSnapToGridToggle}
-                />
-                <span className="slider-switch" />
-              </label>
-            </div>
-
-            <div className="grid-size-selector">
-              {[0.0625, 0.125, 0.25].map(sizeOption => (
-                <button
-                  key={sizeOption}
-                  className={`btn ${gridSize === sizeOption ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => onGridSizeChange(sizeOption)}
-                >
-                  {sizeOption}"
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 2. Style & Size Controls */}
-          <div className="sidebar-section">
-            <span className="section-title">Bug Size</span>
-            <div className="slider-group">
-              <div className="slider-labels">
-                <span>Scale</span>
-                <span className="slider-val">{bugScale}% ({getBugInchDimensions()})</span>
-              </div>
-              <input
-                type="range"
-                min={minScale}
-                max={maxScale}
-                value={bugScale}
-                onChange={handleScaleChange}
-              />
-            </div>
-          </div>
-
-          {/* 3. Color Theme Picker */}
-          <div className="sidebar-section">
-            <span className="section-title">Bug Color</span>
-            
-            {/* Preset Modes */}
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-              <button
-                className={`btn ${colorMode === 'auto' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ flex: 1, padding: '6px 12px', fontSize: '12px' }}
-                onClick={() => onColorModeChange('auto')}
-              >
-                Auto Contrast
-              </button>
-              <button
-                className={`btn ${colorMode === 'preset' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ flex: 1, padding: '6px 12px', fontSize: '12px' }}
-                onClick={() => onColorModeChange('preset')}
-              >
-                Palette
-              </button>
-              <button
-                className={`btn ${colorMode === 'custom' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ flex: 1, padding: '6px 12px', fontSize: '12px' }}
-                onClick={() => onColorModeChange('custom')}
-              >
-                Custom
-              </button>
-            </div>
-
-            {/* Dynamic Display based on Mode */}
-            {colorMode === 'auto' && (
-              <div style={{
-                background: 'var(--bg-card)',
-                padding: '12px',
-                borderRadius: '12px',
-                border: '1px solid var(--border-color)',
-                fontSize: '12px',
-                color: 'var(--text-secondary)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <ShieldCheck size={18} className="logo-icon" style={{ color: 'var(--accent)' }} />
-                <div>
-                  <span>Auto-optimized to Black or White based on background.</span>
-                </div>
-              </div>
-            )}
-
-            {colorMode === 'preset' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Recommended Palette</span>
-                <div className="color-grid">
-                  {extractedColors.map((color, index) => (
-                    <div
-                      key={index}
-                      className={`color-option ${selectedColor.toLowerCase() === color.toLowerCase() ? 'active' : ''}`}
-                      style={{ backgroundColor: color }}
-                      onClick={() => onColorSelect(color)}
-                    >
-                      {selectedColor.toLowerCase() === color.toLowerCase() && (
-                        <Check size={16} className="color-option-icon" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {colorMode === 'custom' && (
-              <div className="color-picker-wrapper">
-                <input
-                  type="color"
-                  className="color-picker-input"
-                  value={selectedColor}
-                  onChange={handleCustomColorChange}
-                />
-                <span className="color-picker-text">{selectedColor}</span>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* 4. Display Toggles */}
-      <div className="sidebar-section">
-        <span className="section-title">Margin Settings</span>
-
-        {/* Mirror Bleed Toggle */}
-        <div className="toggle-item" style={{ borderLeft: bleedEnabled ? '3px solid var(--accent)' : '1px solid var(--border-color)' }}>
-          <div className="toggle-info">
-            <h5 style={{ color: bleedEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
-              {sourceHasBleed ? 'Mirror Bleed Included' : 'Add Mirror Bleed'}
-            </h5>
-            {sourceHasBleed && (
-              <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-                Existing PDF bleed will be preserved.
-              </p>
-            )}
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              {bleedInches.toFixed(3)}" on each edge
-            </p>
-          </div>
-          <label className="switch">
-            <input
-              type="checkbox"
-              checked={bleedEnabled}
-              onChange={onBleedToggle}
-            />
+            <input type="checkbox" checked={bleedEnabled} onChange={onBleedToggle} />
             <span className="slider-switch" />
           </label>
         </div>
 
         {bleedEnabled && (
-          <div style={{
-            marginTop: '8px',
-            padding: '12px',
-            background: 'rgba(168, 85, 247, 0.05)',
-            borderRadius: '8px',
-            border: '1px solid rgba(168, 85, 247, 0.2)'
-          }}>
-            <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>
-              Bleed Size (inches)
-            </label>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div className="sub-setting">
+            <label className="field-label" htmlFor="bleed-size">Bleed size</label>
+            <div className="inline-field">
               <input
+                id="bleed-size"
                 type="number"
                 min="0.001"
                 step="0.001"
                 value={bleedInput}
-                onChange={(e) => {
-                  setBleedInput(e.target.value);
-                  const inches = Number(e.target.value);
-                  if (e.target.value !== '' && Number.isFinite(inches) && inches > 0) {
+                onChange={(event) => {
+                  setBleedInput(event.target.value);
+                  const inches = Number(event.target.value);
+                  if (event.target.value !== '' && Number.isFinite(inches) && inches > 0) {
                     onBleedAmountChange(inches * 72);
                   }
                 }}
                 onBlur={commitBleedInput}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
                     commitBleedInput();
-                    e.currentTarget.blur();
+                    event.currentTarget.blur();
                   }
                 }}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  background: 'var(--bg-input)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '6px',
-                  padding: '7px 8px',
-                  fontSize: '12px',
-                  color: 'var(--text-primary)'
-                }}
-                aria-label="Custom mirror bleed size in inches"
               />
+              <span className="field-suffix">in</span>
               <button
-                className={`btn ${Math.abs(bleedAmount - 9) < 0.001 ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ padding: '7px 10px', fontSize: '11px' }}
+                type="button"
+                className="quiet-button"
                 onClick={() => {
                   onBleedAmountChange(9);
                   setBleedInput('0.125');
                 }}
               >
-                Default 0.125"
+                Use 0.125"
               </button>
             </div>
           </div>
         )}
 
-        {/* Advanced: Crop to TrimBox Toggle */}
-        <div className="toggle-item" style={{ borderLeft: trimCropEnabled ? '3px solid #ff4d4d' : '1px solid var(--border-color)' }}>
-          <div className="toggle-info">
-            <h5 style={{ color: trimCropEnabled ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Crop to Trim Box</h5>
-            
+        <div className="setting-row">
+          <div className="setting-copy">
+            <strong>Crop to trim box</strong>
+            <span>Use the document trim boundary.</span>
           </div>
           <label className="switch">
-            <input
-              type="checkbox"
-              checked={trimCropEnabled}
-              onChange={onTrimCropToggle}
-            />
+            <input type="checkbox" checked={trimCropEnabled} onChange={onTrimCropToggle} />
             <span className="slider-switch" />
           </label>
         </div>
 
-        {/* Manual Margin Inset Controls */}
-        <div style={{ 
-          marginTop: '12px', 
-          padding: '12px', 
-          background: 'rgba(255,255,255,0.02)', 
-          borderRadius: '12px',
-          border: '1px solid var(--border-color)'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)' }}>Manual Crop</span>
-            <span style={{ fontSize: '11px', color: 'var(--accent)', fontWeight: '700' }}>
-              {(manualCropAmount / 72).toFixed(3)}"
-            </span>
+        {trimCropEnabled && (
+          <div className="sub-setting">
+            <div className="field-heading">
+              <label className="field-label" htmlFor="manual-crop">Manual inset</label>
+              <span>{(manualCropAmount / 72).toFixed(3)}"</span>
+            </div>
+            <div className="stepper-control">
+              <button type="button" onClick={() => onManualCropChange(Math.max(0, manualCropAmount - 0.072))}>−</button>
+              <input
+                id="manual-crop"
+                type="number"
+                min="0"
+                step="0.001"
+                value={(manualCropAmount / 72).toFixed(3)}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+                  if (Number.isFinite(value)) onManualCropChange(value * 72);
+                }}
+              />
+              <button type="button" onClick={() => onManualCropChange(manualCropAmount + 0.072)}>+</button>
+            </div>
           </div>
-          
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
-            <button 
-              className="btn btn-secondary" 
-              style={{ padding: '4px 10px' }}
-              onClick={() => onManualCropChange(Math.max(0, manualCropAmount - 0.72))} // -0.01"
-            >
-              -
-            </button>
-            <input
-              type="text"
-              style={{ 
-                flex: 1, 
-                background: 'var(--bg-input)', 
-                border: '1px solid var(--border-color)', 
-                borderRadius: '6px', 
-                padding: '4px', 
-                fontSize: '12px', 
-                textAlign: 'center',
-                color: 'var(--text-primary)'
-              }}
-              value={(manualCropAmount / 72).toFixed(3)}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                if (!isNaN(val)) onManualCropChange(val * 72);
-              }}
-            />
-            <button 
-              className="btn btn-secondary" 
-              style={{ padding: '4px 10px' }}
-              onClick={() => onManualCropChange(manualCropAmount + 0.72)} // +0.01"
-            >
-              +
-            </button>
-          </div>
+        )}
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-            {[0, 0.125, 0.25, 0.375, 0.5].map(inch => (
-              <button
-                key={inch}
-                className={`btn ${manualCropAmount === inch * 72 ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ flex: 1, padding: '4px 0', fontSize: '10px', minWidth: '45px' }}
-                onClick={() => onManualCropChange(inch * 72)}
-              >
-                {inch === 0 ? 'Reset' : `${inch}"`}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Safe Margin Guide Line Toggle */}
-        <div className="toggle-item">
-          <div className="toggle-info">
-            <h5>Safe Zone Guide</h5>
+        <div className="setting-row">
+          <div className="setting-copy">
+            <strong>Safe zone guide</strong>
+            <span>Show trim and safety boundaries.</span>
           </div>
           <label className="switch">
-            <input
-              type="checkbox"
-              checked={showSafeLine}
-              onChange={onShowSafeLineToggle}
-            />
+            <input type="checkbox" checked={showSafeLine} onChange={onShowSafeLineToggle} />
             <span className="slider-switch" />
           </label>
         </div>
-      </div>
+      </WorkflowSection>
 
-      {/* 5. PDF Multipage Apply Settings */}
-      {isMultiPage && bugEnabled && (
-        <div className="sidebar-section">
-          <span className="section-title">Apply Pages</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <select
-              style={{
-                background: 'var(--bg-input)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '12px',
-                padding: '10px 14px',
-                fontSize: '13px',
-                outline: 'none',
-                cursor: 'pointer'
-              }}
-              value={multiPageOptions.applyTo}
-              onChange={(e) => onMultiPageOptionsChange({ ...multiPageOptions, applyTo: e.target.value })}
-            >
-              <option value="current">Current Page Only</option>
-              <option value="all">All Pages</option>
-              <option value="last">Last Page Only</option>
-              <option value="first">First Page Only</option>
-            </select>
+      <WorkflowSection
+        id="bug"
+        title="Union Bug"
+        description={bugEnabled ? `Enabled · ${getBugInchDimensions()}` : 'Optional artwork stamp'}
+        activeSection={activeSection}
+        onToggle={toggleSection}
+      >
+        <div className="setting-row">
+          <div className="setting-copy">
+            <strong>Apply Union Bug</strong>
+            <span>Add the approved vector mark.</span>
           </div>
+          <label className="switch">
+            <input type="checkbox" checked={bugEnabled} onChange={onBugEnabledToggle} />
+            <span className="slider-switch" />
+          </label>
         </div>
-      )}
+
+        {bugEnabled && (
+          <>
+            <div className="field-heading">
+              <span className="field-label">Size</span>
+              <span>{bugScale}% · {getBugInchDimensions()}</span>
+            </div>
+            <input
+              type="range"
+              min={minScale}
+              max={maxScale}
+              value={bugScale}
+              onChange={(event) => onScaleChange(Number(event.target.value))}
+            />
+
+            <div className="field-label">Color</div>
+            <div className="segmented-control three-up">
+              {[
+                ['auto', 'Auto'],
+                ['preset', 'Palette'],
+                ['custom', 'Custom']
+              ].map(([mode, label]) => (
+                <button
+                  type="button"
+                  key={mode}
+                  className={colorMode === mode ? 'active' : ''}
+                  onClick={() => onColorModeChange(mode)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {colorMode === 'auto' && (
+              <div className="inline-note">
+                <ShieldCheck size={16} />
+                Black or white is selected for contrast.
+              </div>
+            )}
+
+            {colorMode === 'preset' && (
+              <div className="color-grid compact">
+                {extractedColors.map((color) => (
+                  <button
+                    type="button"
+                    key={color}
+                    className={`color-option ${selectedColor.toLowerCase() === color.toLowerCase() ? 'active' : ''}`}
+                    style={{ backgroundColor: color }}
+                    onClick={() => onColorSelect(color)}
+                    aria-label={`Use color ${color}`}
+                  >
+                    {selectedColor.toLowerCase() === color.toLowerCase() && <Check size={15} />}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {colorMode === 'custom' && (
+              <label className="color-picker-wrapper">
+                <input
+                  type="color"
+                  className="color-picker-input"
+                  value={selectedColor}
+                  onChange={(event) => onColorSelect(event.target.value)}
+                />
+                <span className="color-picker-text">{selectedColor}</span>
+              </label>
+            )}
+
+            <div className="subsection-heading">Placement</div>
+
+            <div className="field-label">Quick align</div>
+            <div className="segmented-control icon-segments">
+              <button type="button" onClick={() => onQuickAlign('left')}><AlignLeft size={16} />Left</button>
+              <button type="button" onClick={() => onQuickAlign('center')}><AlignCenter size={16} />Center</button>
+              <button type="button" onClick={() => onQuickAlign('right')}><AlignRight size={16} />Right</button>
+            </div>
+
+            <div className="setting-row">
+              <div className="setting-copy">
+                <strong>Show grid</strong>
+                <span>Display placement guides.</span>
+              </div>
+              <label className="switch">
+                <input type="checkbox" checked={showGrid} onChange={onShowGridToggle} />
+                <span className="slider-switch" />
+              </label>
+            </div>
+
+            <div className="setting-row">
+              <div className="setting-copy">
+                <strong>Snap to grid</strong>
+                <span>Snap while dragging the mark.</span>
+              </div>
+              <label className="switch">
+                <input type="checkbox" checked={snapToGrid} onChange={onSnapToGridToggle} />
+                <span className="slider-switch" />
+              </label>
+            </div>
+
+            {(showGrid || snapToGrid) && (
+              <>
+                <div className="field-label">Grid size</div>
+                <div className="segmented-control three-up">
+                  {[0.0625, 0.125, 0.25].map((size) => (
+                    <button
+                      type="button"
+                      key={size}
+                      className={gridSize === size ? 'active' : ''}
+                      onClick={() => onGridSizeChange(size)}
+                    >
+                      {size}"
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {isMultiPage && (
+              <label className="select-field">
+                <span className="field-label">Apply to pages</span>
+                <select
+                  value={multiPageOptions.applyTo}
+                  onChange={(event) => onMultiPageOptionsChange({ ...multiPageOptions, applyTo: event.target.value })}
+                >
+                  <option value="current">Current page only</option>
+                  <option value="all">All pages</option>
+                  <option value="last">Last page only</option>
+                  <option value="first">First page only</option>
+                </select>
+              </label>
+            )}
+
+            <button type="button" className="quiet-button reset-action" onClick={onResetBug}>
+              <RotateCcw size={14} />
+              Reset Union Bug settings
+            </button>
+
+            <details className="advanced-settings-details inline-advanced">
+              <summary>Change Union Bug source</summary>
+              <div className="inline-advanced-content">
+                <UploadZone
+                  label="Union Bug PDF"
+                  accept=".pdf"
+                  onFileSelect={onBugSelect}
+                  selectedFile={bugFile}
+                  onClear={onClearBug}
+                  icon={FileText}
+                />
+              </div>
+            </details>
+          </>
+        )}
+      </WorkflowSection>
+
     </div>
   );
 }
