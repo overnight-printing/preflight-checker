@@ -81,6 +81,24 @@ export default function EditorCanvas({
   const safeWidthPx = Math.max(0, trimWidthPx - (safeInsetPx * 2));
   const safeHeightPx = Math.max(0, trimHeightPx - (safeInsetPx * 2));
 
+  // Keep guide strokes inside the clipped canvas. Borders positioned exactly
+  // on the outer right/bottom edges can disappear after browser zoom scaling.
+  const clampGuideToCanvas = (left, top, width, height) => {
+    const edgeInset = 2;
+    const clampedLeft = Math.max(edgeInset, left);
+    const clampedTop = Math.max(edgeInset, top);
+    const clampedRight = Math.min(canvasWidth - edgeInset, left + width);
+    const clampedBottom = Math.min(canvasHeight - edgeInset, top + height);
+    return {
+      left: clampedLeft,
+      top: clampedTop,
+      width: Math.max(0, clampedRight - clampedLeft),
+      height: Math.max(0, clampedBottom - clampedTop)
+    };
+  };
+  const trimGuide = clampGuideToCanvas(trimLeftPx, trimTopPx, trimWidthPx, trimHeightPx);
+  const safeGuide = clampGuideToCanvas(safeLeftPx, safeTopPx, safeWidthPx, safeHeightPx);
+
   // Sizing limits in canvas pixels: 0.2 inches (min) to 2.0 inches (max)
   const minWidthPx = 0.2 * 72 * canvasScale;
   const maxWidthPx = 2.0 * 72 * canvasScale;
@@ -286,11 +304,11 @@ export default function EditorCanvas({
                 <div 
                   style={{
                     position: 'absolute',
-                    top: `${trimTopPx}px`,
-                    left: `${trimLeftPx}px`,
-                    width: `${trimWidthPx}px`,
-                    height: `${trimHeightPx}px`,
-                    border: `1.5px solid ${pdfBoxInfo ? '#0055ff' : '#ff007f'}`, // Blue for PDF, Magenta for fallback
+                    top: `${trimGuide.top}px`,
+                    left: `${trimGuide.left}px`,
+                    width: `${trimGuide.width}px`,
+                    height: `${trimGuide.height}px`,
+                    border: `2px solid ${pdfBoxInfo ? '#0055ff' : '#ff007f'}`,
                     pointerEvents: 'none',
                     zIndex: 2,
                     boxSizing: 'border-box'
@@ -303,11 +321,11 @@ export default function EditorCanvas({
                 <div 
                   style={{
                     position: 'absolute',
-                    top: `${safeTopPx}px`,
-                    left: `${safeLeftPx}px`,
-                    width: `${safeWidthPx}px`,
-                    height: `${safeHeightPx}px`,
-                    border: '1.5px dashed #00e5ff', // Cyan Dashed Line
+                    top: `${safeGuide.top}px`,
+                    left: `${safeGuide.left}px`,
+                    width: `${safeGuide.width}px`,
+                    height: `${safeGuide.height}px`,
+                    border: '2px dashed #00c7e8',
                     pointerEvents: 'none',
                     zIndex: 2,
                     boxSizing: 'border-box'

@@ -12,6 +12,7 @@ import {
   concatTransformationMatrix,
   drawObject
 } from 'pdf-lib';
+import { requiresRebuiltPdfOutput } from './pdfExportRouting';
 import { decodePDFRawStream } from 'pdf-lib/es/core/streams/decode.js';
 
 // Set up the PDF.js worker from jsDelivr CDN
@@ -655,23 +656,17 @@ export async function stitchBugToPDF(
     }
   }
   
-  // Option A: Standard Vector Overlay (Bleed is Disabled AND no manual crop AND no interactive crop)
-  // Note: if manualCrop or isCropMode is active, we MUST go through the rasterize-and-crop path (Option B)
-  if (bleedAmount === 0 && manualCropAmount === 0 && !isCropMode) {
+  // Option A: unchanged page geometry with an optional vector overlay.
+  // Any requested trim/crop must use Option B so the output page boxes and
+  // visible bounds are rebuilt around the selected trim boundary.
+  if (!requiresRebuiltPdfOutput({ bleedAmount, trimCropEnabled, manualCropAmount, isCropMode })) {
     if (bugEnabled && embeddedBugPage) {
       for (const pageNum of pagesToStitch) {
         if (pageNum < 1 || pageNum > pages.length) continue;
         
         const page = pages[pageNum - 1];
         const cropBox = page.getCropBox();
-        const rawTrimBox = page.getTrimBox() || cropBox;
-        const { trimBox } = getUsableTrimBox(cropBox, rawTrimBox);
-
-        // Note: Option A doesn't execute if manualCropAmount > 0 or isCropMode is true.
-        // We will force Option B if isCropMode is true below.
-
-        // If trimCropEnabled is true, we act as if the TrimBox IS the entire page area
-        const activeBaseBox = trimCropEnabled ? trimBox : cropBox;
+        const activeBaseBox = cropBox;
 
         const cropX = activeBaseBox.x;
         const cropY = activeBaseBox.y;
@@ -696,7 +691,8 @@ export async function stitchBugToPDF(
     return await pdfDoc.save({ useObjectStreams: false });
   }
   
-  // Option B: Expanded Print Output (Bleed OR Manual Crop Enabled)
+  // Option B: rebuilt print output for bleed, TrimBox crop, or manual crop.
+  // Trim-only and bleed-only output preserve the original page as vector PDF.
   const outputDoc = await PDFDocument.create();
   let pdfjsDoc = null;
   const getPdfJsDoc = async () => {
