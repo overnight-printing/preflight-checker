@@ -170,11 +170,23 @@ Use the margin tools as needed:
 
 The guides are preview aids. Confirm the displayed final trim and canvas dimensions before exporting.
 
-### 6. Export
+### 6. Create a customer proof or export production artwork
 
-Click **Save Final Output**.
+To prepare a review file, enter the estimate or invoice number and click **Create Customer Proof PDF**. The resulting PDF:
 
-- A stamped file uses the suffix `_Proof`.
+- uses that number as the Proof ID on every page;
+- shows the complete bleed area with a labeled cut/TrimBox line;
+- labels every artwork page and its finished dimensions;
+- includes the company logo, approval instructions, and review-copy guidance.
+- preserves original PDF artwork color spaces and applies lossless PDF object-stream compression.
+
+The color-preserving proof does not rasterize or downsample PDF artwork. File-size savings therefore depend on how efficiently the source PDF was already encoded; image-heavy proofs may remain close to the original file size.
+
+Customer proofs use a filename such as `campaign-flyer_Customer_Proof_EST-1042.pdf`.
+
+Click **Save Production File** for production artwork.
+
+- A stamped production file uses the suffix `_Production`.
 - A file exported without the Union Bug uses the suffix `_Fixed`.
 - PDF input downloads as PDF.
 - Image input downloads as PNG.
@@ -275,12 +287,13 @@ Crop and bleed settings are global. Visual crop-guide values are currently share
 Examples:
 
 ```text
-campaign-flyer.pdf  -> campaign-flyer_Proof.pdf
+campaign-flyer.pdf  -> campaign-flyer_Customer_Proof_EST-1042.pdf
+campaign-flyer.pdf  -> campaign-flyer_Production.pdf
 campaign-flyer.pdf  -> campaign-flyer_Fixed.pdf
-postcard.jpg        -> postcard_Proof.png
+postcard.jpg        -> postcard_Production.png
 ```
 
-`_Proof` means the Union Bug was enabled during export. `_Fixed` means it was disabled; the file may still contain applied preflight, crop, or bleed changes.
+`_Customer_Proof_...` is the customer review packet. `_Production` means the Union Bug was enabled during production export. `_Fixed` means it was disabled; the file may still contain applied preflight, crop, or bleed changes.
 
 Files are generated in the browser and downloaded through the browser's normal download mechanism.
 
