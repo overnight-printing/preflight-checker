@@ -1,8 +1,5 @@
 import { useState } from 'react';
 import {
-  AlignCenter,
-  AlignLeft,
-  AlignRight,
   Check,
   ChevronDown,
   FileText,
@@ -10,6 +7,19 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import UploadZone from './UploadZone';
+import { parseCustomPageSelection } from '../utils/pageSelection';
+
+const ALIGNMENT_POSITIONS = [
+  ['top-left', 'Top left'],
+  ['top-center', 'Top center'],
+  ['top-right', 'Top right'],
+  ['middle-left', 'Middle left'],
+  ['middle-center', 'Center'],
+  ['middle-right', 'Middle right'],
+  ['bottom-left', 'Bottom left'],
+  ['bottom-center', 'Bottom center'],
+  ['bottom-right', 'Bottom right']
+];
 
 function WorkflowSection({ id, title, description, activeSection, onToggle, children }) {
   const isOpen = activeSection === id;
@@ -50,8 +60,10 @@ export default function ControlPanel({
   bugEnabled,
   onBugEnabledToggle,
   onQuickAlign,
+  currentAlignment,
   multiPageOptions,
   isMultiPage,
+  totalPages,
   onColorModeChange,
   onColorSelect,
   onScaleChange,
@@ -293,10 +305,22 @@ export default function ControlPanel({
             <div className="subsection-heading">Placement</div>
 
             <div className="field-label">Quick align</div>
-            <div className="segmented-control icon-segments">
-              <button type="button" onClick={() => onQuickAlign('left')}><AlignLeft size={16} />Left</button>
-              <button type="button" onClick={() => onQuickAlign('center')}><AlignCenter size={16} />Center</button>
-              <button type="button" onClick={() => onQuickAlign('right')}><AlignRight size={16} />Right</button>
+            <div className="alignment-grid" aria-label="Union Bug alignment">
+              {ALIGNMENT_POSITIONS.map(([position, label]) => (
+                <button
+                  type="button"
+                  key={position}
+                  className={currentAlignment === position ? 'active' : ''}
+                  onClick={() => onQuickAlign(position)}
+                  aria-label={label}
+                  aria-pressed={currentAlignment === position}
+                  title={label}
+                >
+                  <span className={`alignment-glyph ${position}`} aria-hidden="true">
+                    <span />
+                  </span>
+                </button>
+              ))}
             </div>
 
             <div className="setting-row">
@@ -339,8 +363,10 @@ export default function ControlPanel({
               </>
             )}
 
-            {isMultiPage && (
-              <label className="select-field">
+            {isMultiPage && (() => {
+              const customSelection = parseCustomPageSelection(multiPageOptions.customPages || '', totalPages);
+              return (
+              <div className="select-field">
                 <span className="field-label">Apply to pages</span>
                 <select
                   value={multiPageOptions.applyTo}
@@ -350,9 +376,31 @@ export default function ControlPanel({
                   <option value="all">All pages</option>
                   <option value="last">Last page only</option>
                   <option value="first">First page only</option>
+                  <option value="even">Even pages</option>
+                  <option value="odd">Odd pages</option>
+                  <option value="custom">Custom pages…</option>
                 </select>
-              </label>
-            )}
+                {multiPageOptions.applyTo === 'custom' && (
+                  <div className="custom-pages-control">
+                    <input
+                      type="text"
+                      value={multiPageOptions.customPages || ''}
+                      onChange={(event) => onMultiPageOptionsChange({
+                        ...multiPageOptions,
+                        customPages: event.target.value
+                      })}
+                      placeholder="2, 4, 7-10"
+                      aria-label="Custom pages"
+                      aria-invalid={Boolean(customSelection.error)}
+                    />
+                    <span className={customSelection.error ? 'field-error' : 'field-help'}>
+                      {customSelection.error || `${customSelection.pages.length} page${customSelection.pages.length === 1 ? '' : 's'} selected`}
+                    </span>
+                  </div>
+                )}
+              </div>
+              );
+            })()}
 
             <button type="button" className="quiet-button reset-action" onClick={onResetBug}>
               <RotateCcw size={14} />

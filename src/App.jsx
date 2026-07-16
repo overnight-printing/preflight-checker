@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Image as ImageIcon, Sparkles, ClipboardCheck, UploadCloud, Info, ChevronDown } from 'lucide-react';
+import { Image as ImageIcon, Sparkles, ClipboardCheck, UploadCloud, Monitor, Moon, Sun } from 'lucide-react';
 import UploadZone from './components/UploadZone';
 import EditorCanvas from './components/EditorCanvas';
 import ControlPanel from './components/ControlPanel';
@@ -29,6 +29,8 @@ import {
   analyzeBackgroundLuminance,
   extractDominantColors
 } from './utils/colorAnalyzer';
+import { resolveTargetPages } from './utils/pageSelection';
+import { getAlignedPosition, translatePositionForBleed } from './utils/layoutMath';
 
 import './App.css';
 
@@ -131,8 +133,8 @@ export default function App() {
   // Bug overlay enable toggle (allows bleed-only processing)
   const [bugEnabled, setBugEnabled] = useState(false);
 
-  // Quick alignment state ('left' | 'center' | 'right' | 'custom')
-  const [currentAlignment, setCurrentAlignment] = useState('right');
+  // Quick alignment state (3×3 positions or 'custom')
+  const [currentAlignment, setCurrentAlignment] = useState('bottom-right');
 
   // Canvas zoom state
   const [zoom, setZoom] = useState(0.7);
@@ -153,7 +155,10 @@ export default function App() {
   const [preflightResults, setPreflightResults] = useState(null);
   
   // Theme state
-  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'system');
+  const [theme, setTheme] = useState(() => {
+    const savedTheme = localStorage.getItem('theme');
+    return ['light', 'system', 'dark'].includes(savedTheme) ? savedTheme : 'system';
+  });
   
   // Global drag-and-drop state
   const [isGlobalDragActive, setIsGlobalDragActive] = useState(false);
@@ -164,7 +169,8 @@ export default function App() {
   
   // Multi-page options
   const [multiPageOptions, setMultiPageOptions] = useState({
-    applyTo: 'current', // 'current' | 'all' | 'last' | 'first'
+    applyTo: 'current',
+    customPages: ''
   });
 
   // Track if we completed the initial alignment placement for a newly loaded artwork
@@ -172,7 +178,6 @@ export default function App() {
 
   // Collapsible page thumbnails strip state
   const [isThumbnailsExpanded, setIsThumbnailsExpanded] = useState(false);
-  const [isGeometryExpanded, setIsGeometryExpanded] = useState(false);
 
   // Safe zone is ALWAYS 9pt (0.125") inside the trim/cut line — hardcoded, not adjustable
   const pdfHasIncludedBleed = artworkType === 'pdf' && Boolean(pdfBoxInfo?.hasDistinctBleedBox);
@@ -182,10 +187,12 @@ export default function App() {
     const deltaPx = (nextBleed - previousBleed) * canvasScale;
     if (Math.abs(deltaPx) < 0.001) return;
 
-    const translatePosition = (position) => ({
-      left: Math.max(0, position.left + deltaPx),
-      top: Math.max(0, position.top + deltaPx)
-    });
+    const translatePosition = (position) => translatePositionForBleed(
+      position,
+      previousBleed,
+      nextBleed,
+      canvasScale
+    );
 
     setBugPosition((position) => translatePosition(position));
     setPagePositions((positions) => Object.fromEntries(
@@ -207,14 +214,12 @@ export default function App() {
     setBleedAmount(amount);
   }, [bleedAmount, bleedEnabled, translateBugForBleedChange]);
 
-  // Utility to format PDF points (pt) into physical dimensions (inches & millimeters)
-  const formatPtToPhysical = (width, height) => {
+  // Keep the floating size summary concise; detailed PDF box data stays internal.
+  const formatPtToInches = (width, height) => {
     if (!width || !height) return 'N/A';
     const wInch = (width / 72).toFixed(2);
     const hInch = (height / 72).toFixed(2);
-    const wMm = (width * 0.352778).toFixed(1);
-    const hMm = (height * 0.352778).toFixed(1);
-    return `${wInch}" x ${hInch}" (${wMm} x ${hMm} mm)`;
+    return `${wInch}" × ${hInch}"`;
   };
 
   const geometryDetails = pdfBoxInfo ? (() => {
@@ -251,8 +256,8 @@ export default function App() {
     if (bleedEnabled) {
       finalCanvasW += bleedAmount * 2;
       finalCanvasH += bleedAmount * 2;
-      bleedLabel = `${(bleedAmount / 72).toFixed(3)}" Output`;
-    } else if (hasMetadataBleed) {
+      bleedLabel = `${(bleedAmount / 72).toFixed(3)}" each side`;
+    } else if (hasMetadataBleed && !trimCropEnabled) {
       const horizontalBleed = pdfBoxInfo.bleedInsets.left + pdfBoxInfo.bleedInsets.right;
       const verticalBleed = pdfBoxInfo.bleedInsets.top + pdfBoxInfo.bleedInsets.bottom;
       finalCanvasW += horizontalBleed;
@@ -263,15 +268,16 @@ export default function App() {
         (value) => Math.abs(value - bleedValues[0]) < 0.01
       );
       bleedLabel = uniformBleed
-        ? `${(bleedValues[0] / 72).toFixed(3)}" Included`
-        : 'Variable Included';
+        ? `${(bleedValues[0] / 72).toFixed(3)}" in file`
+        : 'Included in file';
     }
 
     return {
-      canvas: formatPtToPhysical(finalCanvasW, finalCanvasH),
-      trim: formatPtToPhysical(finalTrimW, finalTrimH),
-      bleed: bleedLabel,
-      page: `${currentPage} / ${totalPages}`
+      trimSize: formatPtToInches(finalTrimW, finalTrimH),
+      bleedSize: formatPtToInches(finalCanvasW, finalCanvasH),
+      artworkSize: formatPtToInches(pdfBoxInfo.cropBox.width, pdfBoxInfo.cropBox.height),
+      pages: totalPages,
+      bleedDescription: bleedLabel
     };
   })() : null;
 
@@ -314,11 +320,11 @@ export default function App() {
     setShowGrid(false);
     setSnapToGrid(false);
     setGridSize(0.125);
-    setCurrentAlignment('right');
+    setCurrentAlignment('bottom-right');
     setPagePositions({});
     setPageSizes({});
     setPageAlignments({});
-    setMultiPageOptions({ applyTo: 'current' });
+    setMultiPageOptions({ applyTo: 'current', customPages: '' });
     setHasDoneInitialAlignment(false);
   }, []);
 
@@ -374,25 +380,22 @@ export default function App() {
     }
   }, [resetUnionBugSettings]);
 
-  // Handle Theme Switching (Light / Dark / System)
+  // Handle Theme Switching (Light / System / Dark)
   useEffect(() => {
-    const applyTheme = (themeValue) => {
-      let resolvedTheme = themeValue;
-      if (themeValue === 'system') {
-        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        resolvedTheme = isDark ? 'dark' : 'light';
-      }
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const applyTheme = () => {
+      const resolvedTheme = theme === 'system'
+        ? (mediaQuery.matches ? 'dark' : 'light')
+        : theme;
       document.documentElement.setAttribute('data-theme', resolvedTheme);
     };
 
-    applyTheme(theme);
+    applyTheme();
     localStorage.setItem('theme', theme);
 
     if (theme === 'system') {
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      const handleChange = () => applyTheme('system');
-      mediaQuery.addEventListener('change', handleChange);
-      return () => mediaQuery.removeEventListener('change', handleChange);
+      mediaQuery.addEventListener('change', applyTheme);
+      return () => mediaQuery.removeEventListener('change', applyTheme);
     }
   }, [theme]);
 
@@ -838,23 +841,13 @@ export default function App() {
       artworkCanvas.height - (virtualBleedPx * 2) - cropInsets.top - cropInsets.bottom - (safeInsetPx * 2)
     );
 
-    let left = 100;
-    if (alignment === 'left') {
-      left = safeLeftPx;
-    } else if (alignment === 'center') {
-      left = safeLeftPx + (safeWidthPx / 2) - (bugSize.width / 2);
-    } else if (alignment === 'right') {
-      left = safeLeftPx + safeWidthPx - bugSize.width;
-    }
-
-    setBugPosition((prev) => {
-      const defaultTop = safeTopPx + safeHeightPx - bugSize.height;
-      const useDefault = !hasDoneInitialAlignment || !prev || (prev.left === 100 && prev.top === 100);
-      const top = useDefault ? defaultTop : prev.top;
-      const nextPos = { left, top };
-      setPagePositions(p => ({ ...p, [currentPage]: nextPos }));
-      return nextPos;
-    });
+    const nextPos = getAlignedPosition(
+      alignment,
+      { left: safeLeftPx, top: safeTopPx, width: safeWidthPx, height: safeHeightPx },
+      bugSize
+    );
+    setBugPosition(nextPos);
+    setPagePositions(p => ({ ...p, [currentPage]: nextPos }));
     setPageSizes(s => ({ ...s, [currentPage]: bugSize }));
     if (alignment !== 'custom') {
       setPageAlignments(a => ({ ...a, [currentPage]: alignment }));
@@ -863,14 +856,14 @@ export default function App() {
     if (alignment !== 'custom') {
       setCurrentAlignment(alignment);
     }
-  }, [artworkCanvas, bugSize, effectiveBleedAmount, canvasScale, hasDoneInitialAlignment, pdfBoxInfo, currentPage, trimCropEnabled, manualCropAmount, isCropMode, manualCropGuides]);
+  }, [artworkCanvas, bugSize, effectiveBleedAmount, canvasScale, pdfBoxInfo, currentPage, trimCropEnabled, manualCropAmount, isCropMode, manualCropGuides]);
 
   // Automatically align bug if alignment mode is active (not custom)
   useEffect(() => {
     if (artworkCanvas && bugSize) {
       if (!hasDoneInitialAlignment) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
-        handleQuickAlign('right');
+        handleQuickAlign('bottom-right');
         setHasDoneInitialAlignment(true);
       } else if (currentAlignment !== 'custom') {
         handleQuickAlign(currentAlignment);
@@ -956,14 +949,10 @@ export default function App() {
         if (!bugEnabled) {
           // If bug is disabled, we don't stitch anything, but we might still apply mirror bleed
           pagesToStitch = [];
-        } else if (multiPageOptions.applyTo === 'current') {
-          pagesToStitch = [currentPage];
-        } else if (multiPageOptions.applyTo === 'all') {
-          pagesToStitch = Array.from({ length: totalPages }, (_, i) => i + 1);
-        } else if (multiPageOptions.applyTo === 'last') {
-          pagesToStitch = [totalPages];
-        } else if (multiPageOptions.applyTo === 'first') {
-          pagesToStitch = [1];
+        } else {
+          const pageSelection = resolveTargetPages(multiPageOptions, totalPages, currentPage);
+          if (pageSelection.error) throw new Error(pageSelection.error);
+          pagesToStitch = pageSelection.pages;
         }
         
         const activeColor = colorMode === 'auto' ? recommendedColor : selectedColor;
@@ -1029,14 +1018,42 @@ export default function App() {
           <img src="/favicon.png" alt="Logo" style={{ height: '28px', width: '28px', borderRadius: '50%' }} className="logo-icon" />
           <h1>Overnight Preflight Tool</h1>
         </div>
-        <label className="theme-menu">
-          <span className="sr-only">Color theme</span>
-          <select value={theme} onChange={(event) => setTheme(event.target.value)}>
-            <option value="system">System theme</option>
-            <option value="light">Light theme</option>
-            <option value="dark">Dark theme</option>
-          </select>
-        </label>
+        <div className="header-actions">
+          <span className="release-version">v{import.meta.env.VITE_APP_VERSION}</span>
+          <div className="theme-mode-control" role="group" aria-label="Color theme">
+            <button
+              type="button"
+              className={theme === 'light' ? 'active' : ''}
+              onClick={() => setTheme('light')}
+              aria-label="Use light theme"
+              aria-pressed={theme === 'light'}
+              title="Light"
+            >
+              <Sun size={14} />
+            </button>
+            <button
+              type="button"
+              className={theme === 'dark' ? 'active' : ''}
+              onClick={() => setTheme('dark')}
+              aria-label="Use dark theme"
+              aria-pressed={theme === 'dark'}
+              title="Dark"
+            >
+              <Moon size={14} />
+            </button>
+            <button
+              type="button"
+              className={`system-option ${theme === 'system' ? 'active' : ''}`}
+              onClick={() => setTheme('system')}
+              aria-label="Follow system theme automatically"
+              aria-pressed={theme === 'system'}
+              title="Follow system automatically"
+            >
+              <Monitor size={14} />
+              <span>Auto</span>
+            </button>
+          </div>
+        </div>
       </header>
 
       {/* Main Workspace */}
@@ -1063,48 +1080,23 @@ export default function App() {
             <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
               {/* Compact PDF Geometry Summary */}
               {geometryDetails && (
-                <div className={`pdf-geometry-info-card ${isGeometryExpanded ? 'expanded' : ''}`}>
-                  <button
-                    type="button"
-                    className="geometry-summary-bar"
-                    onClick={() => setIsGeometryExpanded((value) => !value)}
-                    aria-expanded={isGeometryExpanded}
-                    aria-label="Toggle PDF geometry details"
-                  >
-                    <Info size={14} />
-                    <span><strong>Document</strong> {geometryDetails.trim}</span>
-                    <span><strong>Bleed</strong> {geometryDetails.bleed}</span>
-                    <ChevronDown size={15} className="geometry-chevron" />
-                  </button>
-
-                  {isGeometryExpanded && (
-                    <div className="geometry-detail-panel">
-                      <div className="info-item">
-                        <span className="info-label">Final Canvas (Crop)</span>
-                        <span className="info-val" title={geometryDetails.canvas}>
-                          {geometryDetails.canvas}
-                        </span>
-                      </div>
-                      <div className="info-item trim-info">
-                        <span className="info-label">Final Trim (Size)</span>
-                        <span className="info-val" title={geometryDetails.trim}>
-                          {geometryDetails.trim}
-                        </span>
-                      </div>
-                      <div className="info-item bleed-info">
-                        <span className="info-label">Bleed Margin</span>
-                        <span className="info-val">
-                          {geometryDetails.bleed}
-                        </span>
-                      </div>
-                      <div className="info-item">
-                        <span className="info-label">Page</span>
-                        <span className="info-val page-info">
-                          {geometryDetails.page} Page
-                        </span>
-                      </div>
-                    </div>
-                  )}
+                <div className="pdf-geometry-info-card" aria-label="Document size summary">
+                  <div className="geometry-stat">
+                    <span>Trim Size</span>
+                    <strong>{geometryDetails.trimSize}</strong>
+                  </div>
+                  <div className="geometry-stat">
+                    <span>Bleed Size</span>
+                    <strong title={geometryDetails.bleedDescription}>{geometryDetails.bleedSize}</strong>
+                  </div>
+                  <div className="geometry-stat">
+                    <span>Artwork Size</span>
+                    <strong>{geometryDetails.artworkSize}</strong>
+                  </div>
+                  <div className="geometry-stat">
+                    <span>Pages</span>
+                    <strong>{geometryDetails.pages}</strong>
+                  </div>
                 </div>
               )}
 
@@ -1237,8 +1229,10 @@ export default function App() {
                   bugEnabled={bugEnabled}
                   onBugEnabledToggle={() => setBugEnabled(!bugEnabled)}
                   onQuickAlign={handleQuickAlign}
+                  currentAlignment={currentAlignment}
                   multiPageOptions={multiPageOptions}
                   isMultiPage={artworkType === 'pdf' && totalPages > 1}
+                  totalPages={totalPages}
                   onColorModeChange={handleColorModeChange}
                   onColorSelect={setSelectedColor}
                   onScaleChange={setBugScale}
