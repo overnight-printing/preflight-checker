@@ -31,3 +31,18 @@ export function getAlignedPosition(alignment, bounds, itemSize) {
 
   return { left, top };
 }
+
+export function getHorizontallyAlignedPosition(alignment, bounds, itemSize, currentPosition) {
+  if (!HORIZONTAL_ALIGNMENTS.has(alignment)) {
+    throw new Error(`Unknown horizontal alignment: ${alignment}`);
+  }
+
+  let left = bounds.left;
+  if (alignment === 'center') {
+    left += (bounds.width - itemSize.width) / 2;
+  } else if (alignment === 'right') {
+    left += bounds.width - itemSize.width;
+  }
+
+  return { left, top: currentPosition.top };
+}

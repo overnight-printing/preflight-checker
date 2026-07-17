@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getAlignedPosition, translatePositionForBleed } from '../src/utils/layoutMath.js';
+import {
+  getAlignedPosition,
+  getHorizontallyAlignedPosition,
+  translatePositionForBleed
+} from '../src/utils/layoutMath.js';
 
 const bounds = { left: 10, top: 20, width: 300, height: 180 };
 const item = { width: 60, height: 30 };
@@ -25,6 +29,22 @@ for (const [alignment, expected] of Object.entries(expectedPositions)) {
 
 test('rejects an unknown alignment', () => {
   assert.throws(() => getAlignedPosition('center', bounds, item), /Unknown alignment/);
+});
+
+for (const [alignment, expectedLeft] of Object.entries({ left: 10, center: 130, right: 250 })) {
+  test(`aligns horizontally to ${alignment} without changing the vertical position`, () => {
+    assert.deepEqual(
+      getHorizontallyAlignedPosition(alignment, bounds, item, { left: 47, top: 123 }),
+      { left: expectedLeft, top: 123 }
+    );
+  });
+}
+
+test('rejects an unknown horizontal alignment', () => {
+  assert.throws(
+    () => getHorizontallyAlignedPosition('middle', bounds, item, { left: 47, top: 123 }),
+    /Unknown horizontal alignment/
+  );
 });
 
 test('moves a position outward when bleed is enabled', () => {

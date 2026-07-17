@@ -21,6 +21,12 @@ const ALIGNMENT_POSITIONS = [
   ['bottom-right', 'Bottom right']
 ];
 
+const HORIZONTAL_ALIGNMENT_OPTIONS = [
+  ['left', 'Align left', 'middle-left'],
+  ['center', 'Align center', 'middle-center'],
+  ['right', 'Align right', 'middle-right']
+];
+
 function WorkflowSection({ id, title, description, activeSection, onToggle, children }) {
   const isOpen = activeSection === id;
 
@@ -60,9 +66,11 @@ export default function ControlPanel({
   bugEnabled,
   onBugEnabledToggle,
   onQuickAlign,
+  onHorizontalAlign,
   currentAlignment,
   multiPageOptions,
   isMultiPage,
+  currentPage,
   totalPages,
   onColorModeChange,
   onColorSelect,
@@ -304,7 +312,34 @@ export default function ControlPanel({
 
             <div className="subsection-heading">Placement</div>
 
-            <div className="field-label">Quick align</div>
+            {isMultiPage && (
+              <div className="inline-note page-placement-note">
+                <FileText size={16} />
+                <span>
+                  <strong>Page {currentPage} of {totalPages}</strong>
+                  Move or align the mark on each page. Every page keeps its own position.
+                </span>
+              </div>
+            )}
+
+            <div className="field-label">Horizontal alignment</div>
+            <div className="segmented-control three-up">
+              {HORIZONTAL_ALIGNMENT_OPTIONS.map(([alignment, label, glyph]) => (
+                <button
+                  type="button"
+                  key={alignment}
+                  onClick={() => onHorizontalAlign(alignment)}
+                  aria-label={label}
+                  title={label}
+                >
+                  <span className={`alignment-glyph ${glyph}`} aria-hidden="true">
+                    <span />
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="field-label">Align to page position</div>
             <div className="alignment-grid" aria-label="Union Bug alignment">
               {ALIGNMENT_POSITIONS.map(([position, label]) => (
                 <button
@@ -398,6 +433,9 @@ export default function ControlPanel({
                     </span>
                   </div>
                 )}
+                <span className="field-help">
+                  Choose the pages to stamp, then use the page bar below the preview to place the mark differently on each one.
+                </span>
               </div>
               );
             })()}
