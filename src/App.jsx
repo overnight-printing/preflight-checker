@@ -35,6 +35,12 @@ import {
   getHorizontallyAlignedPosition,
   translatePositionForBleed
 } from './utils/layoutMath';
+import {
+  createCustomerProofPdf,
+  createPngProofSourcePdf,
+  normalizeProofId,
+  proofIdForFilename
+} from './utils/customerProof';
 
 import './App.css';
 
@@ -153,6 +159,8 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isGeneratingProof, setIsGeneratingProof] = useState(false);
+  const [proofId, setProofId] = useState('');
 
   // Preflight states
   const [activeSidebarTab, setActiveSidebarTab] = useState('preflight'); // 'preflight' is default active tab
@@ -347,6 +355,7 @@ export default function App() {
     setOriginalImage(null);
     setPdfBoxInfo(null);
     setPreflightResults(null);
+    setProofId('');
     setTotalPages(1);
     setCurrentPage(1);
     pdfPageCanvasCacheRef.current.clear();
@@ -459,6 +468,7 @@ export default function App() {
     setPdfDoc(null);
     setPdfBoxInfo(null);
     setOriginalImage(null);
+    setProofId('');
     setBugPosition({ left: 100, top: 100 });
     setPagePositions({});
     setPageSizes({});
@@ -946,63 +956,55 @@ export default function App() {
     }
   };
 
-  // Universal Export Handler (Handles both Stamper and Preflight-only exports)
+  const createPreparedPdfBytes = async () => {
+    if (bugEnabled && !bugFile) {
+      throw new Error('Union Bug PDF is not loaded. Upload a Union Bug PDF or reload the app before saving.');
+    }
+    if (artworkFile.size > LARGE_PDF_BROWSER_LIMIT_BYTES) {
+      const sizeMb = Math.round(artworkFile.size / (1024 * 1024));
+      throw new Error(
+        `This PDF is ${sizeMb} MB, which is too large for browser-based PDF export. Use the local large-PDF workflow instead.`
+      );
+    }
+
+    let pagesToStitch = [];
+    if (bugEnabled) {
+      const pageSelection = resolveTargetPages(multiPageOptions, totalPages, currentPage);
+      if (pageSelection.error) throw new Error(pageSelection.error);
+      pagesToStitch = pageSelection.pages;
+    }
+
+    return stitchBugToPDF(
+      artworkFile,
+      bugFile,
+      colorMode === 'auto' ? recommendedColor : selectedColor,
+      bugPosition,
+      bugSize,
+      canvasScale,
+      pagesToStitch,
+      currentPage,
+      bleedEnabled ? bleedAmount : 0,
+      bugEnabled,
+      { ...pagePositions, [currentPage]: bugPosition },
+      { ...pageSizes, [currentPage]: bugSize },
+      trimCropEnabled,
+      manualCropAmount,
+      isCropMode,
+      manualCropGuides
+    );
+  };
+
+  // Production export remains separate from the customer review proof.
   const handleUniversalExport = async () => {
     if (!artworkFile || !artworkCanvas) return;
-    
+
     setIsExporting(true);
-    
+
     try {
-      const safeFilename = artworkFile.name.replace(/\.[^/.]+$/, "") + (bugEnabled ? '_Proof' : '_Fixed');
+      const safeFilename = artworkFile.name.replace(/\.[^/.]+$/, "") + (bugEnabled ? '_Production' : '_Fixed');
 
-      if (bugEnabled && !bugFile) {
-        throw new Error('Union Bug PDF is not loaded. Upload a Union Bug PDF or reload the app before saving.');
-      }
-      
       if (artworkType === 'pdf') {
-        const activeBleedAmount = bleedEnabled ? bleedAmount : 0;
-
-        if (artworkFile.size > LARGE_PDF_BROWSER_LIMIT_BYTES) {
-          const sizeMb = Math.round(artworkFile.size / (1024 * 1024));
-          throw new Error(
-            `This PDF is ${sizeMb} MB, which is too large for browser-based PDF export. Use the local large-PDF workflow instead.`
-          );
-        }
-
-        // Resolve target pages to stamp
-        let pagesToStitch = [];
-        if (!bugEnabled) {
-          // If bug is disabled, we don't stitch anything, but we might still apply mirror bleed
-          pagesToStitch = [];
-        } else {
-          const pageSelection = resolveTargetPages(multiPageOptions, totalPages, currentPage);
-          if (pageSelection.error) throw new Error(pageSelection.error);
-          pagesToStitch = pageSelection.pages;
-        }
-        
-        const activeColor = colorMode === 'auto' ? recommendedColor : selectedColor;
-        const finalPositions = { ...pagePositions, [currentPage]: bugPosition };
-        const finalSizes = { ...pageSizes, [currentPage]: bugSize };
-
-        const outputBytes = await stitchBugToPDF(
-          artworkFile,
-          bugFile,
-          activeColor,
-          bugPosition,
-          bugSize,
-          canvasScale,
-          pagesToStitch,
-          currentPage,
-          activeBleedAmount, // Pass bleed amount (in points)
-          bugEnabled,  // Pass toggle state
-          finalPositions,
-          finalSizes,
-          trimCropEnabled, // Pass non-destructive toggle
-          manualCropAmount, // Pass manual inset
-          isCropMode,
-          manualCropGuides
-        );
-        
+        const outputBytes = await createPreparedPdfBytes();
         const blob = new Blob([outputBytes], { type: 'application/pdf' });
         downloadFile(blob, `${safeFilename}.pdf`);
       } else {
@@ -1025,6 +1027,63 @@ export default function App() {
       alert(error?.message || 'Error saving file.');
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleCustomerProofExport = async () => {
+    if (!artworkFile || !artworkCanvas) return;
+
+    const normalizedId = normalizeProofId(proofId);
+    if (!normalizedId) {
+      alert('Enter an estimate or invoice number before creating a customer proof.');
+      return;
+    }
+
+    setIsGeneratingProof(true);
+
+    try {
+      let sourcePdfBytes;
+      if (artworkType === 'pdf') {
+        sourcePdfBytes = await createPreparedPdfBytes();
+      } else {
+        const activeBleedAmount = bleedEnabled ? bleedAmount : 0;
+        const bleedPx = activeBleedAmount * canvasScale;
+        const finalImageDataUrl = stitchBugToImage(
+          artworkCanvas,
+          bugCanvas,
+          bugPosition,
+          bugSize,
+          bleedPx,
+          bugEnabled
+        );
+        sourcePdfBytes = await createPngProofSourcePdf({
+          pngDataUrl: finalImageDataUrl,
+          widthPoints: (artworkCanvas.width + (bleedPx * 2)) / canvasScale,
+          heightPoints: (artworkCanvas.height + (bleedPx * 2)) / canvasScale,
+          bleedPoints: activeBleedAmount
+        });
+      }
+
+      const proofBytes = await createCustomerProofPdf({
+        sourcePdfBytes,
+        proofId: normalizedId,
+        sourceName: artworkFile.name,
+        logoPngBytes: await fetch(`${import.meta.env.BASE_URL}logo.png`).then((response) => {
+          if (!response.ok) throw new Error('The company logo could not be loaded for the proof.');
+          return response.arrayBuffer();
+        })
+      });
+      const baseName = artworkFile.name.replace(/\.[^/.]+$/, '');
+      const filenameId = proofIdForFilename(normalizedId);
+      downloadFile(
+        new Blob([proofBytes], { type: 'application/pdf' }),
+        `${baseName}_Customer_Proof_${filenameId}.pdf`
+      );
+    } catch (error) {
+      console.error('Customer proof export error:', error);
+      alert(error?.message || 'Error creating customer proof.');
+    } finally {
+      setIsGeneratingProof(false);
     }
   };
 
@@ -1284,8 +1343,42 @@ export default function App() {
 
               {/* Universal Persistent Export Button at bottom of sidebar */}
               <div className="export-area">
+                <div className="proof-export-section">
+                  <div className="export-heading">
+                    <strong>Customer proof</strong>
+                    <span>Losslessly optimized while preserving original PDF colors.</span>
+                  </div>
+                  <label className="proof-id-field" htmlFor="proof-id">
+                    <span>Estimate or invoice number</span>
+                    <input
+                      id="proof-id"
+                      type="text"
+                      value={proofId}
+                      maxLength={80}
+                      placeholder="Example: EST-1042"
+                      onChange={(event) => setProofId(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    className="btn btn-secondary btn-action-block"
+                    onClick={handleCustomerProofExport}
+                    disabled={isLoading || isScanning || isExporting || isGeneratingProof}
+                  >
+                    {isGeneratingProof ? (
+                      <>
+                        <UploadCloud size={18} className="spinner" style={{ animation: 'spin 1s linear infinite' }} />
+                        Creating proof...
+                      </>
+                    ) : (
+                      <>
+                        <ClipboardCheck size={18} />
+                        Create Customer Proof PDF
+                      </>
+                    )}
+                  </button>
+                </div>
                 <div className="export-heading">
-                  <strong>Export</strong>
+                  <strong>Production file</strong>
                   <span>Save the current output as a production file.</span>
                 </div>
                 <button
@@ -1295,7 +1388,7 @@ export default function App() {
                       : 'btn-secondary'
                   }`}
                   onClick={handleUniversalExport}
-                  disabled={isLoading || isScanning || isExporting}
+                  disabled={isLoading || isScanning || isExporting || isGeneratingProof}
                 >
                   {isExporting ? (
                     <>
@@ -1305,7 +1398,7 @@ export default function App() {
                   ) : (
                     <>
                       <ClipboardCheck size={18} />
-                      Save Final Output
+                      Save Production File
                     </>
                   )}
                 </button>

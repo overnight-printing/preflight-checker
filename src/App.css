@@ -2031,6 +2031,47 @@ input:checked + .slider-switch:before {
   background: var(--bg-surface);
 }
 
+.proof-export-section {
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.proof-id-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.proof-id-field > span {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.proof-id-field input {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  outline: none;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.proof-id-field input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-glow);
+}
+
+.proof-export-section .btn-action-block,
+.export-area > .btn-action-block {
+  width: 100%;
+}
+
 .export-heading {
   margin-bottom: 10px;
 }
