@@ -153,7 +153,7 @@ Open **Stamper Settings**, enable **Apply Union Bug**, and then:
 3. Select Auto Contrast, Palette, or Custom color.
 4. Drag the stamp for exact placement if needed.
 5. Resize it with the canvas handle if needed.
-6. For a multi-page PDF, choose which pages should receive the stamp.
+6. For a multi-page PDF, choose which pages should receive the stamp. Move between pages with the page bar and place the stamp separately on each page.
 
 To use a different stamp, expand **Advanced Settings (Change Stamp PDF)** and upload a PDF.
 
@@ -226,11 +226,13 @@ Always inspect the downloaded file in a production PDF viewer before sending it 
 
 ### Alignment
 
-Quick Align places the stamp near the bottom safe area:
+**Align horizontally — keep height** moves the stamp left, center, or right while preserving its current vertical position. This is useful after dragging the stamp to the desired height.
 
-- **Align Left**
-- **Align Center**
-- **Align Right**
+**Align to page position** offers nine positions across the page:
+
+- Top left, center, or right
+- Middle left, center, or right
+- Bottom left, center, or right
 
 Dragging the stamp switches that page to a custom position.
 
@@ -277,8 +279,11 @@ Union Bug application options:
 - All Pages
 - Last Page Only
 - First Page Only
+- Even Pages
+- Odd Pages
+- Custom Pages
 
-Each visited page can retain its own stamp position and size. Before export, review every page that will receive the stamp, especially when pages have different dimensions or orientations.
+Each page retains its own stamp position and size. Select the pages to stamp, then use the page bar below the preview to visit each one and drag or quick-align the stamp independently. Unvisited selected pages inherit the current placement. Before export, review every page that will receive the stamp, especially when pages have different dimensions or orientations.
 
 Crop and bleed settings are global. Visual crop-guide values are currently shared across pages rather than stored independently.
 
