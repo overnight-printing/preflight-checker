@@ -61,6 +61,10 @@
   height: calc(100vh - 65px);
 }
 
+.workspace.upload-workspace {
+  background: var(--bg-upload-workspace);
+}
+
 /* Empty Upload Screen */
 .upload-screen {
   display: flex;
@@ -1822,8 +1826,7 @@ input:checked + .slider-switch:before {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.segmented-control button:hover,
-.alignment-grid button:hover {
+.segmented-control button:hover {
   background: color-mix(in srgb, var(--primary) 9%, var(--bg-surface));
   color: var(--primary-hover);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 48%, transparent);
@@ -1842,62 +1845,38 @@ input:checked + .slider-switch:before {
   gap: 5px;
 }
 
-.alignment-grid {
+.page-alignment-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 3px;
-  padding: 3px;
-  border: 1px solid var(--border-color);
-  border-radius: 9px;
-  background: var(--bg-input);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
-.alignment-grid button {
+.page-alignment-grid button {
   display: flex;
   align-items: center;
-  justify-content: center;
-  min-height: 34px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
+  justify-content: flex-start;
+  min-height: 44px;
+  gap: 9px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
   cursor: pointer;
-  transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 
-.alignment-grid button.active {
-  background: color-mix(in srgb, var(--primary) 12%, var(--bg-surface));
+.page-alignment-grid button:hover {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border-color));
+  background: var(--bg-card-hover);
   color: var(--primary-hover);
-  box-shadow: inset 0 0 0 1px var(--primary);
 }
 
-.alignment-glyph {
-  position: relative;
-  width: 24px;
-  height: 16px;
-  border: 1px solid currentColor;
-  border-radius: 3px;
-  opacity: 0.85;
+.page-alignment-grid button svg {
+  flex: 0 0 auto;
 }
-
-.alignment-glyph > span {
-  position: absolute;
-  width: 5px;
-  height: 3px;
-  border-radius: 1px;
-  background: currentColor;
-}
-
-.alignment-glyph.top-left > span { top: 2px; left: 2px; }
-.alignment-glyph.top-center > span { top: 2px; left: 50%; transform: translateX(-50%); }
-.alignment-glyph.top-right > span { top: 2px; right: 2px; }
-.alignment-glyph.middle-left > span { top: 50%; left: 2px; transform: translateY(-50%); }
-.alignment-glyph.middle-center > span { top: 50%; left: 50%; transform: translate(-50%, -50%); }
-.alignment-glyph.middle-right > span { top: 50%; right: 2px; transform: translateY(-50%); }
-.alignment-glyph.bottom-left > span { bottom: 2px; left: 2px; }
-.alignment-glyph.bottom-center > span { bottom: 2px; left: 50%; transform: translateX(-50%); }
-.alignment-glyph.bottom-right > span { right: 2px; bottom: 2px; }
-
 
 .inline-note {
   display: flex;

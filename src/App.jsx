@@ -33,6 +33,7 @@ import { resolveTargetPages } from './utils/pageSelection';
 import {
   getAlignedPosition,
   getHorizontallyAlignedPosition,
+  getVerticallyAlignedPosition,
   translatePositionForBleed
 } from './utils/layoutMath';
 import {
@@ -892,6 +893,23 @@ export default function App() {
     setPageSizes((sizes) => ({ ...sizes, [currentPage]: bugSize }));
     setPageAlignments((alignments) => ({ ...alignments, [currentPage]: 'custom' }));
   }, [bugPosition, bugSize, currentPage, getBugPlacementBounds]);
+  const handleVerticalAlign = useCallback((alignment) => {
+    if (!bugSize) return;
+    const placementBounds = getBugPlacementBounds();
+    if (!placementBounds) return;
+
+    const nextPos = getVerticallyAlignedPosition(
+      alignment,
+      placementBounds,
+      bugSize,
+      bugPosition
+    );
+    setBugPosition(nextPos);
+    setCurrentAlignment('custom');
+    setPagePositions((positions) => ({ ...positions, [currentPage]: nextPos }));
+    setPageSizes((sizes) => ({ ...sizes, [currentPage]: bugSize }));
+    setPageAlignments((alignments) => ({ ...alignments, [currentPage]: 'custom' }));
+  }, [bugPosition, bugSize, currentPage, getBugPlacementBounds]);
 
   // Automatically align bug if alignment mode is active (not custom)
   useEffect(() => {
@@ -1001,7 +1019,7 @@ export default function App() {
     setIsExporting(true);
 
     try {
-      const safeFilename = artworkFile.name.replace(/\.[^/.]+$/, "") + (bugEnabled ? '_Production' : '_Fixed');
+      const safeFilename = artworkFile.name.replace(/\.[^/.]+$/, "") + (bugEnabled ? '_Proof' : '_Fixed');
 
       if (artworkType === 'pdf') {
         const outputBytes = await createPreparedPdfBytes();
@@ -1141,7 +1159,7 @@ export default function App() {
       </header>
 
       {/* Main Workspace */}
-      <main className="workspace">
+      <main className={`workspace ${!artworkFile ? 'upload-workspace' : ''}`}>
         {!artworkFile ? (
           /* Empty / Upload State */
           <div className="upload-screen">
@@ -1312,9 +1330,8 @@ export default function App() {
                   onGridSizeChange={setGridSize}
                   bugEnabled={bugEnabled}
                   onBugEnabledToggle={() => setBugEnabled(!bugEnabled)}
-                  onQuickAlign={handleQuickAlign}
                   onHorizontalAlign={handleHorizontalAlign}
-                  currentAlignment={currentAlignment}
+                  onVerticalAlign={handleVerticalAlign}
                   multiPageOptions={multiPageOptions}
                   isMultiPage={artworkType === 'pdf' && totalPages > 1}
                   currentPage={currentPage}

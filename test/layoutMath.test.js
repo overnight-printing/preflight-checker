@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   getAlignedPosition,
   getHorizontallyAlignedPosition,
+  getVerticallyAlignedPosition,
   translatePositionForBleed
 } from '../src/utils/layoutMath.js';
 
@@ -44,6 +45,22 @@ test('rejects an unknown horizontal alignment', () => {
   assert.throws(
     () => getHorizontallyAlignedPosition('middle', bounds, item, { left: 47, top: 123 }),
     /Unknown horizontal alignment/
+  );
+});
+
+for (const [alignment, expectedTop] of Object.entries({ top: 20, middle: 95, bottom: 170 })) {
+  test(`aligns vertically to ${alignment} without changing the horizontal position`, () => {
+    assert.deepEqual(
+      getVerticallyAlignedPosition(alignment, bounds, item, { left: 47, top: 123 }),
+      { left: 47, top: expectedTop }
+    );
+  });
+}
+
+test('rejects an unknown vertical alignment', () => {
+  assert.throws(
+    () => getVerticallyAlignedPosition('center', bounds, item, { left: 47, top: 123 }),
+    /Unknown vertical alignment/
   );
 });
 

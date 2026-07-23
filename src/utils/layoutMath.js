@@ -46,3 +46,17 @@ export function getHorizontallyAlignedPosition(alignment, bounds, itemSize, curr
 
   return { left, top: currentPosition.top };
 }
+export function getVerticallyAlignedPosition(alignment, bounds, itemSize, currentPosition) {
+  if (!VERTICAL_ALIGNMENTS.has(alignment)) {
+    throw new Error(`Unknown vertical alignment: ${alignment}`);
+  }
+
+  let top = bounds.top;
+  if (alignment === 'middle') {
+    top += (bounds.height - itemSize.height) / 2;
+  } else if (alignment === 'bottom') {
+    top += bounds.height - itemSize.height;
+  }
+
+  return { left: currentPosition.left, top };
+}

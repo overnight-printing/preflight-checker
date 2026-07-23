@@ -186,7 +186,7 @@ Customer proofs use a filename such as `campaign-flyer_Customer_Proof_EST-1042.p
 
 Click **Save Production File** for production artwork.
 
-- A stamped production file uses the suffix `_Production`.
+- A stamped production file uses the suffix `_Proof`.
 - A file exported without the Union Bug uses the suffix `_Fixed`.
 - PDF input downloads as PDF.
 - Image input downloads as PNG.
@@ -293,12 +293,12 @@ Examples:
 
 ```text
 campaign-flyer.pdf  -> campaign-flyer_Customer_Proof_EST-1042.pdf
-campaign-flyer.pdf  -> campaign-flyer_Production.pdf
+campaign-flyer.pdf  -> campaign-flyer_Proof.pdf
 campaign-flyer.pdf  -> campaign-flyer_Fixed.pdf
-postcard.jpg        -> postcard_Production.png
+postcard.jpg        -> postcard_Proof.png
 ```
 
-`_Customer_Proof_...` is the customer review packet. `_Production` means the Union Bug was enabled during production export. `_Fixed` means it was disabled; the file may still contain applied preflight, crop, or bleed changes.
+`_Customer_Proof_...` is the customer review packet. `_Proof` means the Union Bug was enabled during production export. `_Fixed` means it was disabled; the file may still contain applied preflight, crop, or bleed changes.
 
 Files are generated in the browser and downloaded through the browser's normal download mechanism.
 
