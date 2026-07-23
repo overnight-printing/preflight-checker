@@ -893,7 +893,6 @@ export default function App() {
     setPageSizes((sizes) => ({ ...sizes, [currentPage]: bugSize }));
     setPageAlignments((alignments) => ({ ...alignments, [currentPage]: 'custom' }));
   }, [bugPosition, bugSize, currentPage, getBugPlacementBounds]);
-
   const handleVerticalAlign = useCallback((alignment) => {
     if (!bugSize) return;
     const placementBounds = getBugPlacementBounds();
@@ -1335,6 +1334,7 @@ export default function App() {
                   onVerticalAlign={handleVerticalAlign}
                   multiPageOptions={multiPageOptions}
                   isMultiPage={artworkType === 'pdf' && totalPages > 1}
+                  currentPage={currentPage}
                   totalPages={totalPages}
                   onColorModeChange={handleColorModeChange}
                   onColorSelect={setSelectedColor}

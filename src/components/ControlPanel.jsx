@@ -72,6 +72,7 @@ export default function ControlPanel({
   onVerticalAlign,
   multiPageOptions,
   isMultiPage,
+  currentPage,
   totalPages,
   onColorModeChange,
   onColorSelect,
@@ -313,6 +314,16 @@ export default function ControlPanel({
 
             <div className="subsection-heading">Placement</div>
 
+            {isMultiPage && (
+              <div className="inline-note page-placement-note">
+                <FileText size={16} />
+                <span>
+                  <strong>Page {currentPage} of {totalPages}</strong>
+                  Move or align the mark on each page. Every page keeps its own position.
+                </span>
+              </div>
+            )}
+
             <div className="field-label">Align to page</div>
             <div className="page-alignment-grid" aria-label="Align Union Bug to page">
               {PAGE_ALIGNMENT_ROWS.flat().map(([axis, alignment, label, Icon]) => (
@@ -406,6 +417,9 @@ export default function ControlPanel({
                     </span>
                   </div>
                 )}
+                <span className="field-help">
+                  Choose the pages to stamp, then use the page bar below the preview to place the mark differently on each one.
+                </span>
               </div>
               );
             })()}

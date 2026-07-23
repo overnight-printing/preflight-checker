@@ -46,7 +46,6 @@ export function getHorizontallyAlignedPosition(alignment, bounds, itemSize, curr
 
   return { left, top: currentPosition.top };
 }
-
 export function getVerticallyAlignedPosition(alignment, bounds, itemSize, currentPosition) {
   if (!VERTICAL_ALIGNMENTS.has(alignment)) {
     throw new Error(`Unknown vertical alignment: ${alignment}`);
