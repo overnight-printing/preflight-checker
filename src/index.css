@@ -10,6 +10,7 @@
   --bg-card: #171a23;
   --bg-card-hover: #1d212c;
   --bg-input: #1b1e28;
+  --bg-upload-workspace: #0c0e13;
   --bg-canvas-workspace: #0c0e13;
   --bg-canvas-container: #1e1e24;
   --bg-loading-overlay: rgba(8, 9, 12, 0.7);
@@ -48,6 +49,7 @@
   --bg-card: #171a23;
   --bg-card-hover: #1d212c;
   --bg-input: #1b1e28;
+  --bg-upload-workspace: #0c0e13;
   --bg-canvas-workspace: #0c0e13;
   --bg-canvas-container: #1e1e24;
   --bg-loading-overlay: rgba(8, 9, 12, 0.7);
@@ -84,7 +86,8 @@
   --bg-card: #f8fafc;
   --bg-card-hover: #f1f5f9;
   --bg-input: #e2e8f0;
-  --bg-canvas-workspace: #cbd5e1;
+  --bg-upload-workspace: #ececec;
+  --bg-canvas-workspace: #ececec;
   --bg-canvas-container: #ffffff;
   --bg-loading-overlay: rgba(240, 242, 245, 0.8);
   --bg-header: #ffffff;

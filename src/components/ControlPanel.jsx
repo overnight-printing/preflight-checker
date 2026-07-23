@@ -1,5 +1,11 @@
 import { useState } from 'react';
 import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignStartHorizontal,
+  AlignStartVertical,
   Check,
   ChevronDown,
   FileText,
@@ -9,16 +15,19 @@ import {
 import UploadZone from './UploadZone';
 import { parseCustomPageSelection } from '../utils/pageSelection';
 
-const ALIGNMENT_POSITIONS = [
-  ['top-left', 'Top left'],
-  ['top-center', 'Top center'],
-  ['top-right', 'Top right'],
-  ['middle-left', 'Middle left'],
-  ['middle-center', 'Center'],
-  ['middle-right', 'Middle right'],
-  ['bottom-left', 'Bottom left'],
-  ['bottom-center', 'Bottom center'],
-  ['bottom-right', 'Bottom right']
+const PAGE_ALIGNMENT_ROWS = [
+  [
+    ['vertical', 'top', 'Top', AlignStartHorizontal],
+    ['horizontal', 'left', 'Left', AlignStartVertical]
+  ],
+  [
+    ['vertical', 'middle', 'Middle', AlignCenterHorizontal],
+    ['horizontal', 'center', 'Center', AlignCenterVertical]
+  ],
+  [
+    ['vertical', 'bottom', 'Bottom', AlignEndHorizontal],
+    ['horizontal', 'right', 'Right', AlignEndVertical]
+  ]
 ];
 
 function WorkflowSection({ id, title, description, activeSection, onToggle, children }) {
@@ -59,8 +68,8 @@ export default function ControlPanel({
   onBleedAmountChange,
   bugEnabled,
   onBugEnabledToggle,
-  onQuickAlign,
-  currentAlignment,
+  onHorizontalAlign,
+  onVerticalAlign,
   multiPageOptions,
   isMultiPage,
   totalPages,
@@ -304,21 +313,20 @@ export default function ControlPanel({
 
             <div className="subsection-heading">Placement</div>
 
-            <div className="field-label">Quick align</div>
-            <div className="alignment-grid" aria-label="Union Bug alignment">
-              {ALIGNMENT_POSITIONS.map(([position, label]) => (
+            <div className="field-label">Align to page</div>
+            <div className="page-alignment-grid" aria-label="Align Union Bug to page">
+              {PAGE_ALIGNMENT_ROWS.flat().map(([axis, alignment, label, Icon]) => (
                 <button
                   type="button"
-                  key={position}
-                  className={currentAlignment === position ? 'active' : ''}
-                  onClick={() => onQuickAlign(position)}
-                  aria-label={label}
-                  aria-pressed={currentAlignment === position}
-                  title={label}
+                  key={`${axis}-${alignment}`}
+                  onClick={() => axis === 'vertical'
+                    ? onVerticalAlign(alignment)
+                    : onHorizontalAlign(alignment)}
+                  aria-label={`Align ${label.toLowerCase()}`}
+                  title={`Align ${label.toLowerCase()}`}
                 >
-                  <span className={`alignment-glyph ${position}`} aria-hidden="true">
-                    <span />
-                  </span>
+                  <Icon size={18} strokeWidth={2} aria-hidden="true" />
+                  <span>{label}</span>
                 </button>
               ))}
             </div>
