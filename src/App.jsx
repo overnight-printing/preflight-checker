@@ -1,29 +1,24 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Image as ImageIcon, Sparkles, ClipboardCheck, UploadCloud, Monitor, Moon, Sun } from 'lucide-react';
+import { Image as ImageIcon, Sparkles, ClipboardCheck, UploadCloud, Monitor, Moon, Sun, X } from 'lucide-react';
 import UploadZone from './components/UploadZone';
 import EditorCanvas from './components/EditorCanvas';
 import ControlPanel from './components/ControlPanel';
 import PageSelector from './components/PageSelector';
 import PreflightPanel from './components/PreflightPanel';
 
-import {
-  loadPDF,
-  getPDFBoxInfo,
-  processUnionBug,
-  stitchBugToPDF,
-  stitchBugToImage,
-  drawMirrorBleed
-} from './utils/pdfProcessor';
+import { drawMirrorBleed, stitchBugToImage } from './utils/canvasProcessor';
 
-import {
-  runPreflightChecks,
-  fixOverprint,
-  fixHiddenLayers,
-  fixBlankPage,
-  fixRasterizePages
-} from './utils/preflightChecker';
-
-// Text detector logic removed
+// Load PDF engines on demand so the upload screen can paint immediately.
+const loadPDF = async (...args) => (await import('./utils/pdfProcessor')).loadPDF(...args);
+const getPDFBoxInfo = async (...args) => (await import('./utils/pdfProcessor')).getPDFBoxInfo(...args);
+const processUnionBug = async (...args) => (await import('./utils/pdfProcessor')).processUnionBug(...args);
+const stitchBugToPDF = async (...args) => (await import('./utils/pdfProcessor')).stitchBugToPDF(...args);
+const runPreflightChecks = async (...args) => (await import('./utils/preflightChecker')).runPreflightChecks(...args);
+const fixOverprint = async (...args) => (await import('./utils/preflightChecker')).fixOverprint(...args);
+const fixBlankPage = async (...args) => (await import('./utils/preflightChecker')).fixBlankPage(...args);
+const fixRasterizePages = async (...args) => (await import('./utils/preflightChecker')).fixRasterizePages(...args);
+const createCustomerProofPdf = async (...args) => (await import('./utils/customerProof')).createCustomerProofPdf(...args);
+const createPngProofSourcePdf = async (...args) => (await import('./utils/customerProof')).createPngProofSourcePdf(...args);
 
 import {
   analyzeBackgroundLuminance,
@@ -36,12 +31,9 @@ import {
   getVerticallyAlignedPosition,
   translatePositionForBleed
 } from './utils/layoutMath';
-import {
-  createCustomerProofPdf,
-  createPngProofSourcePdf,
-  normalizeProofId,
-  proofIdForFilename
-} from './utils/customerProof';
+import { getOutputGeometry, rotatedSize } from './utils/pdfGeometry';
+import { validateArtworkFile, MAX_PDF_BYTES } from './utils/fileValidation';
+import { normalizeProofId, proofIdForFilename } from './utils/proofId';
 
 import './App.css';
 
@@ -74,8 +66,6 @@ const downloadFile = (data, filename) => {
   }
 };
 
-const LARGE_PDF_BROWSER_LIMIT_BYTES = 250 * 1024 * 1024;
-
 export default function App() {
   // File states
   const [artworkFile, setArtworkFile] = useState(null);
@@ -88,7 +78,8 @@ export default function App() {
   const [pdfBoxInfo, setPdfBoxInfo] = useState(null); // Metadata dimensions (CropBox, TrimBox) of active PDF page
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const canvasScale = 1.5; // Default 1.5 for crisp canvas rendering
+  const [imageDpi, setImageDpi] = useState(300);
+  const canvasScale = artworkType === 'image' ? imageDpi / 72 : 1.5;
   
   // Rendered canvases
   const [artworkCanvas, setArtworkCanvas] = useState(null);
@@ -112,8 +103,8 @@ export default function App() {
 
   // Calculate dynamic scale limits based on Union Bug base width (to enforce 0.2" to 2.0" limits)
   // 0.2" = 14.4pt, 2.0" = 144pt. minScale = 1440/width, maxScale = 14400/width.
-  const minScale = bugBaseSize && bugBaseSize.width ? Math.round(1440 / bugBaseSize.width) : 10;
-  const maxScale = bugBaseSize && bugBaseSize.width ? Math.round(14400 / bugBaseSize.width) : 300;
+  const minScale = bugBaseSize && bugBaseSize.width ? Math.ceil(1440 / bugBaseSize.width) : 10;
+  const maxScale = bugBaseSize && bugBaseSize.width ? Math.floor(14400 / bugBaseSize.width) : 300;
 
   // Clamp bugScale during render if bugBaseSize changes and scale goes out of bounds
   if (bugBaseSize.width !== prevBugBaseSize.width || bugBaseSize.height !== prevBugBaseSize.height) {
@@ -138,7 +129,6 @@ export default function App() {
   const [isCropMode] = useState(false); // Interactive visual crop mode disabled
   const [manualCropGuides] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
 
-  const [sourceHasBleed, setSourceHasBleed] = useState(true); // Default true for PDFs (0.125" / 9pt bleed included)
   const [originalImage, setOriginalImage] = useState(null); // Keeps the original Image element for reactive image bleed redraws
 
   // Bug overlay enable toggle (allows bleed-only processing)
@@ -158,6 +148,9 @@ export default function App() {
 
   // Loading States
   const [isLoading, setIsLoading] = useState(false);
+  const [isBugRendering, setIsBugRendering] = useState(false);
+  const [isBugLoading, setIsBugLoading] = useState(false);
+  const [notice, setNotice] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isGeneratingProof, setIsGeneratingProof] = useState(false);
@@ -169,7 +162,8 @@ export default function App() {
   
   // Theme state
   const [theme, setTheme] = useState(() => {
-    const savedTheme = localStorage.getItem('theme');
+    let savedTheme;
+    try { savedTheme = localStorage.getItem('theme'); } catch { /* Storage can be unavailable in private browsing. */ }
     return ['light', 'system', 'dark'].includes(savedTheme) ? savedTheme : 'system';
   });
   
@@ -178,6 +172,8 @@ export default function App() {
   const dragCounter = useRef(0);
   const artworkLoadRequestIdRef = useRef(0);
   const renderRequestIdRef = useRef(0);
+  const scanRequestIdRef = useRef(0);
+  const bugRequestIdRef = useRef(0);
   const pdfPageCanvasCacheRef = useRef(new Map());
   
   // Multi-page options
@@ -235,69 +231,49 @@ export default function App() {
     return `${wInch}" × ${hInch}"`;
   };
 
-  const geometryDetails = pdfBoxInfo ? (() => {
-    // Professional PDF page boxes describe the intended physical product
-    // independently of render/crop controls. Prefer explicit boxes only when
-    // they are genuinely distinct; crop guides are a fallback.
-    const hasMetadataTrim = pdfBoxInfo.hasDistinctTrimBox;
-    const hasMetadataBleed = hasMetadataTrim && pdfBoxInfo.hasDistinctBleedBox;
-    const baseBox = hasMetadataTrim ? pdfBoxInfo.trimBox : pdfBoxInfo.cropBox;
-    const manualInset = manualCropAmount || 0;
-
-    let finalTrimW = baseBox.width - (manualInset * 2);
-    let finalTrimH = baseBox.height - (manualInset * 2);
-
-    if (!hasMetadataTrim && isCropMode && manualCropGuides) {
-      const guideLeftPt = manualCropGuides.left / canvasScale;
-      const guideRightPt = manualCropGuides.right / canvasScale;
-      const guideTopPt = manualCropGuides.top / canvasScale;
-      const guideBottomPt = manualCropGuides.bottom / canvasScale;
-      finalTrimW -= (guideLeftPt + guideRightPt);
-      finalTrimH -= (guideTopPt + guideBottomPt);
-    }
-
-    finalTrimW = Math.max(1, finalTrimW);
-    finalTrimH = Math.max(1, finalTrimH);
-
-    const outputBaseBox = bleedEnabled && !trimCropEnabled
-      ? pdfBoxInfo.cropBox
-      : baseBox;
-    let finalCanvasW = Math.max(1, outputBaseBox.width - (manualInset * 2));
-    let finalCanvasH = Math.max(1, outputBaseBox.height - (manualInset * 2));
-    let bleedLabel = 'None';
-
-    if (bleedEnabled) {
-      finalCanvasW += bleedAmount * 2;
-      finalCanvasH += bleedAmount * 2;
-      bleedLabel = `${(bleedAmount / 72).toFixed(3)}" each side`;
-    } else if (hasMetadataBleed && !trimCropEnabled) {
-      const horizontalBleed = pdfBoxInfo.bleedInsets.left + pdfBoxInfo.bleedInsets.right;
-      const verticalBleed = pdfBoxInfo.bleedInsets.top + pdfBoxInfo.bleedInsets.bottom;
-      finalCanvasW += horizontalBleed;
-      finalCanvasH += verticalBleed;
-
-      const bleedValues = Object.values(pdfBoxInfo.bleedInsets);
-      const uniformBleed = bleedValues.every(
-        (value) => Math.abs(value - bleedValues[0]) < 0.01
-      );
-      bleedLabel = uniformBleed
-        ? `${(bleedValues[0] / 72).toFixed(3)}" in file`
-        : 'Included in file';
-    }
-
-    return {
-      trimSize: formatPtToInches(finalTrimW, finalTrimH),
-      bleedSize: formatPtToInches(finalCanvasW, finalCanvasH),
-      artworkSize: formatPtToInches(pdfBoxInfo.cropBox.width, pdfBoxInfo.cropBox.height),
-      pages: totalPages,
-      bleedDescription: bleedLabel
+  let geometryDetails = null;
+  let geometryError = '';
+  if (pdfBoxInfo) {
+    try {
+      const { trimBox, outputBox } = getOutputGeometry(pdfBoxInfo, {
+        trimCropEnabled, manualCropAmount, bleedAmount: effectiveBleedAmount
+      });
+      const trim = rotatedSize(trimBox, pdfBoxInfo.rotation);
+      const output = rotatedSize(outputBox, pdfBoxInfo.rotation);
+      const artwork = rotatedSize(pdfBoxInfo.cropBox, pdfBoxInfo.rotation);
+      geometryDetails = {
+        trimSize: formatPtToInches(trim.width, trim.height),
+        bleedSize: formatPtToInches(output.width, output.height),
+        artworkSize: formatPtToInches(artwork.width, artwork.height),
+        pages: totalPages,
+        bleedDescription: bleedEnabled ? `Added ${(bleedAmount / 72).toFixed(3)}" each side`
+          : pdfHasIncludedBleed && !trimCropEnabled ? 'Included in file' : 'None'
+      };
+    } catch (error) { geometryError = error.message; }
+  }
+  if (artworkType === 'image' && artworkCanvas && originalImage) {
+    const bleedPx = Math.round(effectiveBleedAmount * canvasScale);
+    geometryDetails = {
+      trimSize: formatPtToInches((artworkCanvas.width - 2 * bleedPx) / canvasScale, (artworkCanvas.height - 2 * bleedPx) / canvasScale),
+      bleedSize: formatPtToInches(artworkCanvas.width / canvasScale, artworkCanvas.height / canvasScale),
+      artworkSize: formatPtToInches(originalImage.width / canvasScale, originalImage.height / canvasScale),
+      pages: 1,
+      bleedDescription: `${imageDpi} DPI · ${bleedEnabled ? 'Added mirror bleed' : 'No bleed'}`
     };
-  })() : null;
+  }
+  const pageSelection = resolveTargetPages(multiPageOptions, totalPages, currentPage);
+  const selectionError = bugEnabled ? pageSelection.error || (pageSelection.pages.length === 0 ? 'No pages selected for the Union Bug.' : '') : '';
+  const exportError = geometryError || selectionError || (bugEnabled && (!bugFile || !bugCanvas) ? 'Load a Union Bug PDF before exporting.' : '');
+  const isBusy = isLoading || isBugLoading || isExporting || isGeneratingProof;
+  const canExport = artworkCanvas && !isBusy && !isScanning && !isBugRendering && !exportError;
 
-
+  const hasArtwork = Boolean(artworkFile);
 
   // Auto-load default Union Bug from public directory on mount
   useEffect(() => {
+    if (!hasArtwork || bugFile || bugRequestIdRef.current !== 0) return;
+    let active = true;
+    const requestId = bugRequestIdRef.current;
     const loadDefaultBug = async () => {
       try {
         const response = await fetch(`${import.meta.env.BASE_URL}union-bug-black.pdf`);
@@ -310,6 +286,8 @@ export default function App() {
         const bugPage = await bugDoc.getPage(1);
         const viewport = bugPage.getViewport({ scale: 1.0 });
         
+        await bugDoc.destroy();
+        if (!active || requestId !== bugRequestIdRef.current) return;
         setBugFile(file);
         setBugBaseSize({
           width: viewport.width,
@@ -321,12 +299,17 @@ export default function App() {
     };
     
     loadDefaultBug();
-  }, []);
+    return () => { active = false; };
+  }, [hasArtwork, bugFile]);
+
+  useEffect(() => {
+    return () => { pdfDoc?.destroy(); };
+  }, [pdfDoc]);
 
   const resetUnionBugSettings = useCallback(() => {
     setBugEnabled(false);
     setBugPosition({ left: 100, top: 100 });
-    setBugScale(100);
+    setBugScale(Math.max(minScale, Math.min(maxScale, 100)));
     setColorMode('auto');
     setSelectedColor('#000000');
     setRecommendedColor('#000000');
@@ -339,15 +322,27 @@ export default function App() {
     setPageAlignments({});
     setMultiPageOptions({ applyTo: 'current', customPages: '' });
     setHasDoneInitialAlignment(false);
-  }, []);
+  }, [minScale, maxScale]);
 
   // 1. Handle Artwork File Upload
   const handleArtworkSelect = useCallback(async (file) => {
+    const validationError = validateArtworkFile(file);
+    if (validationError) { setNotice({ type: 'error', message: validationError }); return; }
     const requestId = artworkLoadRequestIdRef.current + 1;
     artworkLoadRequestIdRef.current = requestId;
     renderRequestIdRef.current += 1;
 
     setIsLoading(true);
+    setNotice(null);
+    scanRequestIdRef.current += 1;
+    setIsScanning(false);
+    setBleedEnabled(false);
+    setBleedAmount(9);
+    setImageDpi(300);
+    setTrimCropEnabled(false);
+    setManualCropAmount(0);
+    setExtractedColors(['#000000', '#ffffff']);
+    setIsThumbnailsExpanded(false);
     resetUnionBugSettings();
     setArtworkFile(file);
     setOriginalFile(file); // Store initial upload as backup
@@ -366,15 +361,13 @@ export default function App() {
       
       if (extension === 'pdf') {
         setArtworkType('pdf');
-        setSourceHasBleed(true); // PDFs are typically print-ready with 0.125" bleed
         const doc = await loadPDF(file);
-        if (requestId !== artworkLoadRequestIdRef.current) return;
+        if (requestId !== artworkLoadRequestIdRef.current) { await doc.destroy(); return; }
         setPdfDoc(doc);
         setTotalPages(doc.numPages);
         setCurrentPage(1);
       } else {
         setArtworkType('image');
-        setSourceHasBleed(false); // Images typically don't have bleed included
         setPdfDoc(null);
         setTotalPages(1);
         setCurrentPage(1);
@@ -385,12 +378,10 @@ export default function App() {
     } catch (error) {
       if (requestId !== artworkLoadRequestIdRef.current) return;
       console.error('Error loading artwork file:', error);
-      alert('Error loading artwork file.');
+      setNotice({ type: 'error', message: `Unable to load artwork. ${error.message || 'Choose a valid PDF or image and try again.'}` });
+      setIsLoading(false);
+      setOriginalFile(null);
       setArtworkFile(null);
-    } finally {
-      if (requestId === artworkLoadRequestIdRef.current) {
-        setIsLoading(false);
-      }
     }
   }, [resetUnionBugSettings]);
 
@@ -405,7 +396,7 @@ export default function App() {
     };
 
     applyTheme();
-    localStorage.setItem('theme', theme);
+    try { localStorage.setItem('theme', theme); } catch { /* The theme still applies without storage. */ }
 
     if (theme === 'system') {
       mediaQuery.addEventListener('change', applyTheme);
@@ -417,7 +408,7 @@ export default function App() {
   const handleDragEnter = useCallback((e) => {
     e.preventDefault();
     dragCounter.current++;
-    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+    if (e.dataTransfer.types.includes('Files')) {
       setIsGlobalDragActive(true);
     }
   }, []);
@@ -441,17 +432,24 @@ export default function App() {
     
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
-      handleArtworkSelect(file);
+      if (!isExporting && !isGeneratingProof) handleArtworkSelect(file);
       e.dataTransfer.clearData();
     }
-  }, [handleArtworkSelect]);
+  }, [handleArtworkSelect, isExporting, isGeneratingProof]);
 
   useEffect(() => {
+    const resetDragState = () => { dragCounter.current = 0; setIsGlobalDragActive(false); };
+    window.addEventListener('drop', resetDragState, true);
+    window.addEventListener('dragend', resetDragState);
+    window.addEventListener('blur', resetDragState);
     window.addEventListener('dragenter', handleDragEnter);
     window.addEventListener('dragleave', handleDragLeave);
     window.addEventListener('dragover', handleDragOver);
     window.addEventListener('drop', handleDrop);
     return () => {
+      window.removeEventListener('drop', resetDragState, true);
+      window.removeEventListener('dragend', resetDragState);
+      window.removeEventListener('blur', resetDragState);
       window.removeEventListener('dragenter', handleDragEnter);
       window.removeEventListener('dragleave', handleDragLeave);
       window.removeEventListener('dragover', handleDragOver);
@@ -463,6 +461,13 @@ export default function App() {
   const handleClearArtwork = () => {
     artworkLoadRequestIdRef.current += 1;
     renderRequestIdRef.current += 1;
+    scanRequestIdRef.current += 1;
+    setIsLoading(false);
+    setIsScanning(false);
+    setPreflightResults(null);
+    setNotice(null);
+    setCurrentPage(1);
+    setTotalPages(1);
     setArtworkFile(null);
     setOriginalFile(null);
     setArtworkCanvas(null);
@@ -480,45 +485,14 @@ export default function App() {
 
   // Resets the current artwork back to the original uploaded file (undo all preflight fixes/crops)
   const handleResetArtwork = async () => {
-    if (!originalFile) return;
-    
-    setIsLoading(true);
-    try {
-      setArtworkFile(originalFile);
-      
-      const extension = originalFile.name.split('.').pop().toLowerCase();
-      
-      if (extension === 'pdf') {
-        setArtworkType('pdf');
-        const doc = await loadPDF(originalFile);
-        setPdfDoc(doc);
-        setTotalPages(doc.numPages);
-        setCurrentPage(1);
-        pdfPageCanvasCacheRef.current.clear();
-      } else {
-        setArtworkType('image');
-        setPdfDoc(null);
-        setTotalPages(1);
-        setCurrentPage(1);
-        const img = await loadImageElement(originalFile);
-        setOriginalImage(img);
-      }
-      
-      // Reset common states
-      setBleedEnabledPreservingBug(false);
-      setTrimCropEnabled(false);
-      setManualCropAmount(0);
-      setSourceHasBleed(extension === 'pdf');
-    } catch (error) {
-      console.error('Error resetting artwork:', error);
-      alert('Error resetting artwork.');
-    } finally {
-      setIsLoading(false);
-    }
+    if (originalFile) await handleArtworkSelect(originalFile);
   };
 
   // Clears the union bug state
   const handleClearBug = () => {
+    bugRequestIdRef.current += 1;
+    setIsBugLoading(false);
+    setIsBugRendering(false);
     setBugFile(null);
     setBugCanvas(null);
     setBugImageSrc('');
@@ -532,21 +506,23 @@ export default function App() {
 
 
   const getCachedPDFPageCanvas = async (doc, pageNum) => {
-    const cacheKey = `${pageNum}:${canvasScale}`;
-    const cached = pdfPageCanvasCacheRef.current.get(cacheKey);
-    if (cached) return cached;
-
-    const page = await doc.getPage(pageNum);
-    const viewport = page.getViewport({ scale: canvasScale });
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(viewport.width);
-    canvas.height = Math.round(viewport.height);
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    pdfPageCanvasCacheRef.current.set(cacheKey, canvas);
-    return canvas;
+    const cache = pdfPageCanvasCacheRef.current;
+    const cached = cache.get(pageNum);
+    if (cached?.doc === doc) return cached.promise;
+    const promise = (async () => {
+      const page = await doc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: canvasScale });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      return canvas;
+    })();
+    cache.set(pageNum, { doc, promise });
+    // Keep only a few previews in memory for long documents.
+    if (cache.size > 3) cache.delete(cache.keys().next().value);
+    try { return await promise; }
+    catch (error) { if (cache.get(pageNum)?.promise === promise) cache.delete(pageNum); throw error; }
   };
 
   const buildProcessedCanvas = (source, bleed, selectedBleedAmount = 0, crop = null) => {
@@ -556,8 +532,9 @@ export default function App() {
     const cropBottom = Math.max(0, Math.round(crop?.bottom || 0));
     const sourceW = source.width || source.naturalWidth;
     const sourceH = source.height || source.naturalHeight;
-    const finalW = Math.max(1, sourceW - cropLeft - cropRight);
-    const finalH = Math.max(1, sourceH - cropTop - cropBottom);
+    const finalW = sourceW - cropLeft - cropRight;
+    const finalH = sourceH - cropTop - cropBottom;
+    if (finalW <= 0 || finalH <= 0) throw new Error('The crop inset removes the entire page. Reduce the manual inset.');
     const bleedPx = Math.round((bleed ? selectedBleedAmount : 0) * canvasScale);
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(finalW + (bleedPx * 2));
@@ -569,6 +546,8 @@ export default function App() {
       croppedTemp.width = Math.round(finalW);
       croppedTemp.height = Math.round(finalH);
       const tempCtx = croppedTemp.getContext('2d');
+      tempCtx.fillStyle = '#ffffff';
+      tempCtx.fillRect(0, 0, croppedTemp.width, croppedTemp.height);
       tempCtx.drawImage(source, cropLeft, cropTop, finalW, finalH, 0, 0, finalW, finalH);
       drawMirrorBleed(ctx, croppedTemp, finalW, finalH, bleedPx);
     } else {
@@ -590,11 +569,9 @@ export default function App() {
     };
 
     if (trimCrop && boxInfo?.trimBox && boxInfo?.cropBox) {
-      const { trimBox, cropBox } = boxInfo;
-      crop.left += (trimBox.x - cropBox.x) * canvasScale;
-      crop.right += ((cropBox.x + cropBox.width) - (trimBox.x + trimBox.width)) * canvasScale;
-      crop.bottom += (trimBox.y - cropBox.y) * canvasScale;
-      crop.top += (cropBox.height - (trimBox.y - cropBox.y + trimBox.height)) * canvasScale;
+      for (const edge of ['left', 'right', 'bottom', 'top']) {
+        crop[edge] += boxInfo.trimInsets[edge] * canvasScale;
+      }
     }
 
     return crop;
@@ -620,7 +597,10 @@ export default function App() {
       const colors = extractDominantColors(canvas, true);
       setExtractedColors(colors);
     } catch (error) {
-      console.error(`Error rendering PDF page ${pageNum}:`, error);
+      if (requestId === renderRequestIdRef.current) {
+        setArtworkCanvas(null);
+        setNotice({ type: 'error', message: error.message || 'Unable to render this PDF page.' });
+      }
     }
   };
 
@@ -643,7 +623,7 @@ export default function App() {
 
   // Reactive Effect: Re-renders the artwork canvas when page, doc, bleed, image, trimCrop, or manualCrop changes
   useEffect(() => {
-    if (!artworkFile) return;
+    if (!artworkFile || (artworkType === 'pdf' ? !pdfDoc : !originalImage)) return;
     
     const updateArtworkRender = async () => {
       const requestId = renderRequestIdRef.current + 1;
@@ -656,7 +636,10 @@ export default function App() {
           renderImageCanvas(originalImage, bleedEnabled, bleedAmount, manualCropAmount);
         }
       } catch (error) {
-        console.error('Error updating artwork render:', error);
+        if (requestId === renderRequestIdRef.current) {
+          setArtworkCanvas(null);
+          setNotice({ type: 'error', message: error.message || 'Unable to render artwork.' });
+        }
       } finally {
         if (requestId === renderRequestIdRef.current) {
           setIsLoading(false);
@@ -665,29 +648,30 @@ export default function App() {
     };
     
     updateArtworkRender();
+    return () => { renderRequestIdRef.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveBleedAmount, bleedEnabled, bleedAmount, trimCropEnabled, manualCropAmount, currentPage, originalImage, pdfDoc, pdfBoxInfo]);
+  }, [effectiveBleedAmount, bleedEnabled, bleedAmount, trimCropEnabled, manualCropAmount, currentPage, originalImage, pdfDoc, pdfBoxInfo, canvasScale]);
 
   // 2. Handle Union Bug File Upload
   const handleBugSelect = async (file) => {
-    setIsLoading(true);
-    setBugFile(file);
+    const requestId = ++bugRequestIdRef.current;
+    setIsBugLoading(true);
     try {
-      // Load PDF bug to find its original scale / aspect ratio
       const bugDoc = await loadPDF(file);
+      if (bugDoc.numPages !== 1) { await bugDoc.destroy(); throw new Error('Choose a one-page PDF for the Union Bug.'); }
       const bugPage = await bugDoc.getPage(1);
-      const viewport = bugPage.getViewport({ scale: 1.0 });
-      
-      setBugBaseSize({
-        width: viewport.width,
-        height: viewport.height
-      });
+      const viewport = bugPage.getViewport({ scale: 1 });
+      await bugDoc.destroy();
+      if (requestId !== bugRequestIdRef.current) return;
+      setBugCanvas(null);
+      setBugImageSrc('');
+      setBugFile(file);
+      setBugBaseSize({ width: viewport.width, height: viewport.height });
+      setPageSizes({});
     } catch (error) {
-      console.error('Error parsing Union Bug PDF:', error);
-      alert('Error loading Union Bug PDF.');
-      setBugFile(null);
+      if (requestId === bugRequestIdRef.current) setNotice({ type: 'error', message: `Unable to load Union Bug. ${error.message}` });
     } finally {
-      setIsLoading(false);
+      if (requestId === bugRequestIdRef.current) setIsBugLoading(false);
     }
   };
 
@@ -708,19 +692,25 @@ export default function App() {
     if (!bugFile) return;
 
     const activeColor = colorMode === 'auto' ? recommendedColor : selectedColor;
+    let active = true;
 
     const renderAndColorBug = async () => {
+      setIsBugRendering(true);
       try {
         // Preview rendering resolution increased to 8.0 DPI (approx. 600 DPI equivalent) to maintain crisp vector sharpness even when zoomed in.
         const { canvas } = await processUnionBug(bugFile, activeColor, 8.0);
+        if (!active) return;
         setBugCanvas(canvas);
         setBugImageSrc(canvas.toDataURL('image/png'));
       } catch (error) {
-        console.error('Error color-tinting Union Bug:', error);
+        if (active) setNotice({ type: 'error', message: `Unable to render the Union Bug. ${error.message}` });
+      } finally {
+        if (active) setIsBugRendering(false);
       }
     };
 
     renderAndColorBug();
+    return () => { active = false; };
   }, [bugFile, colorMode, selectedColor, recommendedColor]);
 
   // 5. Contrast Sampler: calculate background luminance at current position
@@ -758,20 +748,22 @@ export default function App() {
   const handleRunFullPreflight = useCallback(async () => {
     if (!artworkFile || artworkType !== 'pdf' || !pdfDoc) return;
 
+    const requestId = ++scanRequestIdRef.current;
     setIsScanning(true);
     try {
       const results = await runPreflightChecks(artworkFile, pdfDoc);
-      setPreflightResults(results);
+      if (requestId === scanRequestIdRef.current) setPreflightResults(results);
     } catch (err) {
-      console.error('Error running preflight checks:', err);
+      if (requestId === scanRequestIdRef.current) setNotice({ type: 'error', message: `Preflight failed. ${err.message}` });
     } finally {
-      setIsScanning(false);
+      if (requestId === scanRequestIdRef.current) setIsScanning(false);
     }
   }, [artworkFile, pdfDoc, artworkType]);
 
   // Handler for Preflight Auto-Fixes
   const handlePreflightFix = async (checkKey) => {
-    if (!artworkFile) return;
+    if (!artworkFile || isBusy || isScanning) return;
+    const requestId = artworkLoadRequestIdRef.current;
     setIsLoading(true);
     try {
       const arrayBuffer = await artworkFile.arrayBuffer();
@@ -780,23 +772,25 @@ export default function App() {
       if (checkKey === 'bleed') {
         // Fix Bleed: Enable mirror bleed in settings
         setBleedEnabledPreservingBug(true);
-        setSourceHasBleed(false);
         setIsLoading(false);
         return;
       } else if (checkKey === 'overprint') {
         updatedBytes = await fixOverprint(arrayBuffer);
-      } else if (checkKey === 'hiddenLayers') {
-        updatedBytes = await fixHiddenLayers(arrayBuffer);
+
       } else if (checkKey === 'blankPages') {
         const blankPages = preflightResults?.checks?.blankPages?.value || [];
         if (blankPages.length === 0) return;
         const pageToRemove = blankPages[0];
         updatedBytes = await fixBlankPage(arrayBuffer, pageToRemove);
+        setPagePositions({});
+        setPageSizes({});
+        setPageAlignments({});
+        setHasDoneInitialAlignment(false);
         if (currentPage >= pageToRemove && currentPage > 1) {
           setCurrentPage(prev => prev - 1);
         }
       } else if (checkKey === 'fontEmbedding' || checkKey === 'spotColors') {
-        // Rasterize pages to flatten spot colors and outline fonts
+        // Rasterize all pages to resolve embedding/spot resources; this produces RGB pixels.
         const pagesToFix = Array.from({ length: totalPages }, (_, i) => i + 1);
         updatedBytes = await fixRasterizePages(arrayBuffer, pdfDoc, pagesToFix);
       }
@@ -806,8 +800,14 @@ export default function App() {
         const correctedFile = new File([correctedBlob], artworkFile.name, { type: 'application/pdf' });
         
         // Re-load corrected PDF
-        setArtworkFile(correctedFile);
         const doc = await loadPDF(correctedFile);
+        if (requestId !== artworkLoadRequestIdRef.current) { await doc.destroy(); return; }
+        renderRequestIdRef.current += 1;
+        pdfPageCanvasCacheRef.current.clear();
+        setPdfBoxInfo(null);
+        setArtworkCanvas(null);
+        setPreflightResults(null);
+        setArtworkFile(correctedFile);
         setPdfDoc(doc);
         setTotalPages(doc.numPages);
 
@@ -815,18 +815,18 @@ export default function App() {
         setIsScanning(true);
         try {
           const results = await runPreflightChecks(correctedFile, doc);
-          setPreflightResults(results);
+          if (requestId === artworkLoadRequestIdRef.current) setPreflightResults(results);
         } catch (scanErr) {
           console.error('Error re-scanning after fix:', scanErr);
         } finally {
-          setIsScanning(false);
+          if (requestId === artworkLoadRequestIdRef.current) setIsScanning(false);
         }
       }
     } catch (error) {
       console.error(`Error fixing preflight check ${checkKey}:`, error);
-      alert(`Error fixing issue: ${error.message || 'Unknown error'}`);
+      if (requestId === artworkLoadRequestIdRef.current) setNotice({ type: 'error', message: `Unable to apply fix. ${error.message || 'Try again.'}` });
     } finally {
-      setIsLoading(false);
+      if (requestId === artworkLoadRequestIdRef.current) setIsLoading(false);
     }
   };
 
@@ -864,6 +864,8 @@ export default function App() {
     if (!placementBounds) return;
 
     const nextPos = getAlignedPosition(alignment, placementBounds, bugSize);
+    nextPos.left = Math.max(0, Math.min(nextPos.left, artworkCanvas.width - bugSize.width));
+    nextPos.top = Math.max(0, Math.min(nextPos.top, artworkCanvas.height - bugSize.height));
     setBugPosition(nextPos);
     setPagePositions(p => ({ ...p, [currentPage]: nextPos }));
     setPageSizes(s => ({ ...s, [currentPage]: bugSize }));
@@ -874,7 +876,7 @@ export default function App() {
     if (alignment !== 'custom') {
       setCurrentAlignment(alignment);
     }
-  }, [bugSize, currentPage, getBugPlacementBounds]);
+  }, [artworkCanvas, bugSize, currentPage, getBugPlacementBounds]);
 
   const handleHorizontalAlign = useCallback((alignment) => {
     if (!bugSize) return;
@@ -887,12 +889,14 @@ export default function App() {
       bugSize,
       bugPosition
     );
+    nextPos.left = Math.max(0, Math.min(nextPos.left, artworkCanvas.width - bugSize.width));
+    nextPos.top = Math.max(0, Math.min(nextPos.top, artworkCanvas.height - bugSize.height));
     setBugPosition(nextPos);
     setCurrentAlignment('custom');
     setPagePositions((positions) => ({ ...positions, [currentPage]: nextPos }));
     setPageSizes((sizes) => ({ ...sizes, [currentPage]: bugSize }));
     setPageAlignments((alignments) => ({ ...alignments, [currentPage]: 'custom' }));
-  }, [bugPosition, bugSize, currentPage, getBugPlacementBounds]);
+  }, [artworkCanvas, bugPosition, bugSize, currentPage, getBugPlacementBounds]);
   const handleVerticalAlign = useCallback((alignment) => {
     if (!bugSize) return;
     const placementBounds = getBugPlacementBounds();
@@ -904,12 +908,14 @@ export default function App() {
       bugSize,
       bugPosition
     );
+    nextPos.left = Math.max(0, Math.min(nextPos.left, artworkCanvas.width - bugSize.width));
+    nextPos.top = Math.max(0, Math.min(nextPos.top, artworkCanvas.height - bugSize.height));
     setBugPosition(nextPos);
     setCurrentAlignment('custom');
     setPagePositions((positions) => ({ ...positions, [currentPage]: nextPos }));
     setPageSizes((sizes) => ({ ...sizes, [currentPage]: bugSize }));
     setPageAlignments((alignments) => ({ ...alignments, [currentPage]: 'custom' }));
-  }, [bugPosition, bugSize, currentPage, getBugPlacementBounds]);
+  }, [artworkCanvas, bugPosition, bugSize, currentPage, getBugPlacementBounds]);
 
   // Automatically align bug if alignment mode is active (not custom)
   useEffect(() => {
@@ -922,7 +928,7 @@ export default function App() {
         handleQuickAlign(currentAlignment);
       }
     }
-  }, [currentAlignment, bleedEnabled, bleedAmount, sourceHasBleed, bugSize, artworkCanvas, hasDoneInitialAlignment, handleQuickAlign]);
+  }, [currentAlignment, bleedEnabled, bleedAmount, bugSize, artworkCanvas, hasDoneInitialAlignment, handleQuickAlign]);
 
   // Drag End handler to set custom alignment status
   const handleDragEnd = () => {
@@ -932,15 +938,16 @@ export default function App() {
 
   // Page Switcher for PDFs
   const handlePageChange = async (newPage) => {
-    if (newPage < 1 || newPage > totalPages) return;
+    if (newPage === currentPage || newPage < 1 || newPage > totalPages || isBusy) return;
 
     // Cache current page state to coordinates maps before shifting
     setPagePositions(prev => ({ ...prev, [currentPage]: bugPosition }));
     setPageSizes(prev => ({ ...prev, [currentPage]: bugSize }));
     setPageAlignments(prev => ({ ...prev, [currentPage]: currentAlignment }));
 
-    setIsLoading(true);
     setCurrentPage(newPage);
+    setArtworkCanvas(null);
+    setPdfBoxInfo(null);
     try {
       // PDF re-rendering will be automatically fired by reactive useEffect!
       const savedPos = pagePositions[newPage];
@@ -969,8 +976,6 @@ export default function App() {
       }
     } catch (error) {
       console.error('Page switch error:', error);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -978,10 +983,10 @@ export default function App() {
     if (bugEnabled && !bugFile) {
       throw new Error('Union Bug PDF is not loaded. Upload a Union Bug PDF or reload the app before saving.');
     }
-    if (artworkFile.size > LARGE_PDF_BROWSER_LIMIT_BYTES) {
+    if (artworkFile.size > MAX_PDF_BYTES) {
       const sizeMb = Math.round(artworkFile.size / (1024 * 1024));
       throw new Error(
-        `This PDF is ${sizeMb} MB, which is too large for browser-based PDF export. Use the local large-PDF workflow instead.`
+        `This PDF is ${sizeMb} MB, which exceeds the 250 MB browser export limit. Use a desktop PDF editor or choose a smaller PDF.`
       );
     }
 
@@ -989,13 +994,48 @@ export default function App() {
     if (bugEnabled) {
       const pageSelection = resolveTargetPages(multiPageOptions, totalPages, currentPage);
       if (pageSelection.error) throw new Error(pageSelection.error);
+      if (pageSelection.pages.length === 0) throw new Error('No pages selected for the Union Bug.');
       pagesToStitch = pageSelection.pages;
+    }
+
+    const exportPositions = { ...pagePositions, [currentPage]: bugPosition };
+    const exportSizes = { ...pageSizes, [currentPage]: bugSize };
+    const exportColors = {};
+    for (const pageNum of pagesToStitch) {
+      const box = pageNum === currentPage ? pdfBoxInfo : await getPDFBoxInfo(artworkFile, pageNum);
+      const baseCanvas = await getCachedPDFPageCanvas(pdfDoc, pageNum);
+      const canvas = pageNum === currentPage ? artworkCanvas : buildProcessedCanvas(
+        baseCanvas, bleedEnabled, bleedAmount, getPDFCropInsets(box, trimCropEnabled, manualCropAmount)
+      );
+      const size = exportSizes[pageNum] || bugSize;
+      if (size.width > canvas.width || size.height > canvas.height) throw new Error(`The Union Bug is larger than page ${pageNum}. Reduce its size.`);
+      const alignment = pageNum === currentPage ? currentAlignment : pageAlignments[pageNum] || currentAlignment;
+      if (alignment !== 'custom') {
+        const insets = box?.hasDistinctTrimBox && !trimCropEnabled ? Object.fromEntries(
+          Object.entries(box.trimInsets).map(([edge, inset]) => [edge, Math.max(0, inset - manualCropAmount) * canvasScale])
+        ) : { left: 0, top: 0, right: 0, bottom: 0 };
+        const margin = (effectiveBleedAmount + 9) * canvasScale;
+        exportPositions[pageNum] = getAlignedPosition(alignment, {
+          left: margin + insets.left, top: margin + insets.top,
+          width: Math.max(0, canvas.width - 2 * margin - insets.left - insets.right),
+          height: Math.max(0, canvas.height - 2 * margin - insets.top - insets.bottom)
+        }, size);
+      }
+      const position = exportPositions[pageNum] || bugPosition;
+      exportPositions[pageNum] = {
+        left: Math.max(0, Math.min(position.left, canvas.width - size.width)),
+        top: Math.max(0, Math.min(position.top, canvas.height - size.height))
+      };
+      exportSizes[pageNum] = size;
+      const analysis = colorMode === 'auto' && analyzeBackgroundLuminance(canvas,
+        exportPositions[pageNum].left, exportPositions[pageNum].top, size.width, size.height);
+      exportColors[pageNum] = colorMode === 'auto' ? (analysis.isDark ? '#ffffff' : '#000000') : selectedColor;
     }
 
     return stitchBugToPDF(
       artworkFile,
       bugFile,
-      colorMode === 'auto' ? recommendedColor : selectedColor,
+      exportColors,
       bugPosition,
       bugSize,
       canvasScale,
@@ -1003,8 +1043,8 @@ export default function App() {
       currentPage,
       bleedEnabled ? bleedAmount : 0,
       bugEnabled,
-      { ...pagePositions, [currentPage]: bugPosition },
-      { ...pageSizes, [currentPage]: bugSize },
+      exportPositions,
+      exportSizes,
       trimCropEnabled,
       manualCropAmount,
       isCropMode,
@@ -1014,7 +1054,7 @@ export default function App() {
 
   // Production export remains separate from the customer review proof.
   const handleUniversalExport = async () => {
-    if (!artworkFile || !artworkCanvas) return;
+    if (!canExport) return;
 
     setIsExporting(true);
 
@@ -1027,33 +1067,33 @@ export default function App() {
         downloadFile(blob, `${safeFilename}.pdf`);
       } else {
         // Image export (pass bleed in pixels)
-        const activeBleedAmount = bleedEnabled ? bleedAmount : 0;
-        const bleedPx = activeBleedAmount * canvasScale;
         const finalImageDataUrl = stitchBugToImage(
           artworkCanvas,
           bugCanvas,
           bugPosition,
           bugSize,
-          bleedPx,
-          bugEnabled // Pass toggle state
+          0,
+          bugEnabled // Preview already includes the selected bleed
         );
         
         downloadFile(finalImageDataUrl, `${safeFilename}.png`);
       }
+      setNotice({ type: 'success', message: 'Production file downloaded.' });
     } catch (error) {
       console.error('Export error:', error);
-      alert(error?.message || 'Error saving file.');
+      setNotice({ type: 'error', message: error?.message || 'Unable to save file.' });
     } finally {
       setIsExporting(false);
     }
   };
 
   const handleCustomerProofExport = async () => {
-    if (!artworkFile || !artworkCanvas) return;
+    if (!canExport) return;
 
     const normalizedId = normalizeProofId(proofId);
     if (!normalizedId) {
-      alert('Enter an estimate or invoice number before creating a customer proof.');
+      setNotice({ type: 'error', message: 'Enter an estimate or invoice number before creating a customer proof.' });
+      document.getElementById('proof-id')?.focus();
       return;
     }
 
@@ -1065,19 +1105,18 @@ export default function App() {
         sourcePdfBytes = await createPreparedPdfBytes();
       } else {
         const activeBleedAmount = bleedEnabled ? bleedAmount : 0;
-        const bleedPx = activeBleedAmount * canvasScale;
         const finalImageDataUrl = stitchBugToImage(
           artworkCanvas,
           bugCanvas,
           bugPosition,
           bugSize,
-          bleedPx,
+          0,
           bugEnabled
         );
         sourcePdfBytes = await createPngProofSourcePdf({
           pngDataUrl: finalImageDataUrl,
-          widthPoints: (artworkCanvas.width + (bleedPx * 2)) / canvasScale,
-          heightPoints: (artworkCanvas.height + (bleedPx * 2)) / canvasScale,
+          widthPoints: artworkCanvas.width / canvasScale,
+          heightPoints: artworkCanvas.height / canvasScale,
           bleedPoints: activeBleedAmount
         });
       }
@@ -1097,9 +1136,10 @@ export default function App() {
         new Blob([proofBytes], { type: 'application/pdf' }),
         `${baseName}_Customer_Proof_${filenameId}.pdf`
       );
+      setNotice({ type: 'success', message: 'Customer proof downloaded.' });
     } catch (error) {
       console.error('Customer proof export error:', error);
-      alert(error?.message || 'Error creating customer proof.');
+      setNotice({ type: 'error', message: error?.message || 'Unable to create customer proof.' });
     } finally {
       setIsGeneratingProof(false);
     }
@@ -1116,10 +1156,10 @@ export default function App() {
   return (
     <div className="app-container">
       <header className="app-header">
-        <div className="logo-section" onClick={handleClearArtwork} style={{ cursor: 'pointer' }} title="Go to Homepage">
-          <img src="/favicon.png" alt="Logo" style={{ height: '28px', width: '28px', borderRadius: '50%' }} className="logo-icon" />
+        <button type="button" className="logo-section" onClick={handleClearArtwork} disabled={isExporting || isGeneratingProof} aria-label="Return to upload screen" title="Go to Homepage">
+          <img src={`${import.meta.env.BASE_URL}favicon.png`} alt="Logo" style={{ height: '28px', width: '28px', borderRadius: '50%' }} className="logo-icon" />
           <h1>Overnight Preflight Tool</h1>
-        </div>
+        </button>
         <div className="header-actions">
           <span className="release-version">v{import.meta.env.VITE_APP_VERSION}</span>
           <div className="theme-mode-control" role="group" aria-label="Color theme">
@@ -1158,8 +1198,14 @@ export default function App() {
         </div>
       </header>
 
+      {notice && (
+        <div className={`app-notice ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'}>
+          <span>{notice.message}</span>
+          <button type="button" aria-label="Dismiss message" onClick={() => setNotice(null)}><X size={18} /></button>
+        </div>
+      )}
       {/* Main Workspace */}
-      <main className={`workspace ${!artworkFile ? 'upload-workspace' : ''}`}>
+      <main className={`workspace ${!artworkFile ? 'upload-workspace' : ''}`} aria-busy={isBusy}>
         {!artworkFile ? (
           /* Empty / Upload State */
           <div className="upload-screen">
@@ -1179,7 +1225,7 @@ export default function App() {
           /* Editor State */
           <>
             {/* 1. Canvas Area */}
-            <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+            <div className="editor-pane" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
               {/* Compact PDF Geometry Summary */}
               {geometryDetails && (
                 <div className="pdf-geometry-info-card" aria-label="Document size summary">
@@ -1188,11 +1234,11 @@ export default function App() {
                     <strong>{geometryDetails.trimSize}</strong>
                   </div>
                   <div className="geometry-stat">
-                    <span>Bleed Size</span>
+                    <span>Output Size</span>
                     <strong title={geometryDetails.bleedDescription}>{geometryDetails.bleedSize}</strong>
                   </div>
                   <div className="geometry-stat">
-                    <span>Artwork Size</span>
+                    <span>{artworkType === 'image' ? `Artwork · ${imageDpi} DPI` : 'Artwork Size'}</span>
                     <strong>{geometryDetails.artworkSize}</strong>
                   </div>
                   <div className="geometry-stat">
@@ -1210,7 +1256,6 @@ export default function App() {
                 size={bugSize}
                 canvasScale={canvasScale}
                 pdfBoxInfo={pdfBoxInfo}
-                sourceHasBleed={sourceHasBleed}
                 showSafeLine={showSafeLine}
                 bleedEnabled={bleedEnabled} // Draw actual Magenta Trim Line
                 bleedAmount={effectiveBleedAmount}
@@ -1218,7 +1263,7 @@ export default function App() {
                 manualCropAmount={manualCropAmount}
                 isCropMode={isCropMode}
                 manualCropGuides={manualCropGuides}
-                bugEnabled={bugEnabled}
+                bugEnabled={bugEnabled && pageSelection.pages.includes(currentPage)}
                 showGrid={showGrid}
                 snapToGrid={snapToGrid}
                 gridSize={gridSize}
@@ -1273,9 +1318,10 @@ export default function App() {
               </div>
 
               {/* Tab Switcher */}
-              <div className="sidebar-tabs">
+              <div className="sidebar-tabs" role="group" aria-label="Editor tools">
                 <button 
                   className={`tab-btn ${activeSidebarTab === 'preflight' ? 'active' : ''}`}
+                  aria-pressed={activeSidebarTab === 'preflight'}
                   onClick={() => setActiveSidebarTab('preflight')}
                 >
                   <ClipboardCheck size={14} />
@@ -1283,6 +1329,7 @@ export default function App() {
                 </button>
                 <button 
                   className={`tab-btn ${activeSidebarTab === 'stamper' ? 'active' : ''}`}
+                  aria-pressed={activeSidebarTab === 'stamper'}
                   onClick={() => setActiveSidebarTab('stamper')}
                 >
                   <Sparkles size={14} />
@@ -1298,11 +1345,13 @@ export default function App() {
                   accept=".pdf,.png,.jpg,.jpeg"
                   onFileSelect={handleArtworkSelect}
                   selectedFile={artworkFile}
+                  disabled={isExporting || isGeneratingProof}
                   onClear={handleClearArtwork}
                   icon={ImageIcon}
                 />
               </div>
 
+              <fieldset className="tool-controls" disabled={isBusy || isScanning}>
               {activeSidebarTab === 'stamper' ? (
                 <ControlPanel
                   colorMode={colorMode}
@@ -1315,11 +1364,14 @@ export default function App() {
                   showSafeLine={showSafeLine}
                   bleedEnabled={bleedEnabled}
                   sourceHasBleed={pdfHasIncludedBleed}
+                  isPdf={artworkType === 'pdf'}
+                  imageDpi={imageDpi}
+                  onImageDpiChange={setImageDpi}
                   onBleedToggle={() => setBleedEnabledPreservingBug(!bleedEnabled)}
                   bleedAmount={bleedAmount}
                   onBleedAmountChange={setBleedAmountPreservingBug}
                   trimCropEnabled={trimCropEnabled}
-                  onTrimCropToggle={() => setTrimCropEnabled(!trimCropEnabled)}
+                  onTrimCropToggle={() => { setTrimCropEnabled(!trimCropEnabled); setManualCropAmount(0); }}
                   manualCropAmount={manualCropAmount}
                   onManualCropChange={setManualCropAmount}
                   showGrid={showGrid}
@@ -1351,6 +1403,7 @@ export default function App() {
                 <PreflightPanel
                   results={preflightResults}
                   isScanning={isScanning}
+                  bleedAmount={effectiveBleedAmount}
                   onRunFullCheck={handleRunFullPreflight}
                   onFix={handlePreflightFix}
                   onReset={handleResetArtwork}
@@ -1358,8 +1411,10 @@ export default function App() {
                 />
               )}
 
+              </fieldset>
               {/* Universal Persistent Export Button at bottom of sidebar */}
               <div className="export-area">
+                {exportError && <p className="field-error" role="alert">{exportError}</p>}
                 <div className="proof-export-section">
                   <div className="export-heading">
                     <strong>Customer proof</strong>
@@ -1379,7 +1434,7 @@ export default function App() {
                   <button
                     className="btn btn-secondary btn-action-block"
                     onClick={handleCustomerProofExport}
-                    disabled={isLoading || isScanning || isExporting || isGeneratingProof}
+                    disabled={!canExport}
                   >
                     {isGeneratingProof ? (
                       <>
@@ -1405,7 +1460,7 @@ export default function App() {
                       : 'btn-secondary'
                   }`}
                   onClick={handleUniversalExport}
-                  disabled={isLoading || isScanning || isExporting || isGeneratingProof}
+                  disabled={!canExport}
                 >
                   {isExporting ? (
                     <>
@@ -1428,7 +1483,7 @@ export default function App() {
 
       {/* Global loading spinner screen */}
       {isLoading && (
-        <div className="loading-overlay">
+        <div className="loading-overlay" role="status" aria-live="polite">
           <div className="spinner" />
           <h4 style={{ fontSize: '15px', fontWeight: '500' }}>Rendering and loading layout...</h4>
         </div>
@@ -1440,7 +1495,7 @@ export default function App() {
           <div className="global-drag-content">
             <UploadCloud size={48} className="global-drag-icon" />
             <h3>Upload Artwork PDF/Image</h3>
-            <p>Drop files here to load and run preflight checks.</p>
+            <p>Drop a PDF, PNG, JPG, or JPEG to open the editor.</p>
           </div>
         </div>
       )}

@@ -139,41 +139,45 @@ export default function EditorCanvas({
     onZoomChange(finalZoom);
   }, [artworkCanvas, bottomPadding, onZoomChange, topPadding]);
 
-  const lastFileRef = useRef(null);
-  const lastBoxInfoRef = useRef(null);
-
   useEffect(() => {
-    if (!artworkFile) {
-      lastFileRef.current = null;
-      lastBoxInfoRef.current = null;
-      return;
-    }
+    if (!containerRef.current || !artworkFile || !artworkCanvas) return;
+    const observer = new ResizeObserver(handleFitToHeight);
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [artworkCanvas, artworkFile, handleFitToHeight]);
 
-    if (artworkCanvas) {
-      const isNewFile = !lastFileRef.current || 
-        lastFileRef.current.name !== artworkFile.name;
-      
-      const isBoxInfoLoaded = pdfBoxInfo !== null && lastBoxInfoRef.current === null;
-      
-      if (isNewFile || isBoxInfoLoaded) {
-        const frameId = requestAnimationFrame(() => {
-          requestAnimationFrame(handleFitToHeight);
-        });
-        lastFileRef.current = artworkFile;
-        if (pdfBoxInfo) {
-          lastBoxInfoRef.current = pdfBoxInfo;
-        }
-        return () => cancelAnimationFrame(frameId);
-      }
-    }
-  }, [artworkCanvas, artworkFile, pdfBoxInfo, handleFitToHeight]);
+  const moveWithKeyboard = (event) => {
+    const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+    if (!direction) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const step = snapToGrid ? gridSizePx : canvasScale * (event.shiftKey ? 10 : 1);
+    onPositionChange({
+      left: Math.max(0, Math.min(position.left + direction[0] * step, canvasWidth - size.width)),
+      top: Math.max(0, Math.min(position.top + direction[1] * step, canvasHeight - size.height))
+    });
+    onDragEnd?.();
+  };
+
+  const resizeWithKeyboard = (event) => {
+    const direction = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[event.key];
+    if (!direction) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const ratio = size.width / size.height;
+    const width = Math.max(minWidthPx, Math.min(maxWidthPx,
+      canvasWidth - position.left, (canvasHeight - position.top) * ratio,
+      size.width + direction * canvasScale * (event.shiftKey ? 10 : 1)));
+    onSizeChange({ width, height: width / ratio });
+    onDragEnd?.();
+  };
 
   // Handle Drag Start
   const handleDragStart = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+    const clientX = e.touches?.[0]?.clientX ?? e.clientX;
+    const clientY = e.touches?.[0]?.clientY ?? e.clientY;
     setIsDragging(true);
     setDragStart({ x: clientX, y: clientY });
     setBugStartPos({ left: position.left, top: position.top });
@@ -183,8 +187,8 @@ export default function EditorCanvas({
   const handleResizeStart = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+    const clientX = e.touches?.[0]?.clientX ?? e.clientX;
+    const clientY = e.touches?.[0]?.clientY ?? e.clientY;
     setIsResizing(true);
     setDragStart({ x: clientX, y: clientY });
     setBugStartSize({ width: size.width, height: size.height });
@@ -195,8 +199,9 @@ export default function EditorCanvas({
   useEffect(() => {
     const handleMove = (e) => {
       if (!isDragging && !isResizing) return;
-      const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-      const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+      if (e.cancelable) e.preventDefault();
+      const clientX = e.touches?.[0]?.clientX ?? e.clientX;
+      const clientY = e.touches?.[0]?.clientY ?? e.clientY;
       const deltaX = (clientX - dragStart.x) / zoom;
       const deltaY = (clientY - dragStart.y) / zoom;
       
@@ -230,6 +235,7 @@ export default function EditorCanvas({
       window.addEventListener('mouseup', handleEnd);
       window.addEventListener('touchmove', handleMove, { passive: false });
       window.addEventListener('touchend', handleEnd);
+      window.addEventListener('touchcancel', handleEnd);
     }
 
     return () => {
@@ -237,6 +243,7 @@ export default function EditorCanvas({
       window.removeEventListener('mouseup', handleEnd);
       window.removeEventListener('touchmove', handleMove);
       window.removeEventListener('touchend', handleEnd);
+      window.removeEventListener('touchcancel', handleEnd);
     };
   }, [isDragging, isResizing, dragStart, bugStartPos, bugStartSize, aspectRatio, canvasWidth, canvasHeight, size, position, zoom, minWidthPx, maxWidthPx, snapValueToGrid, onPositionChange, onSizeChange, onDragEnd]);
 
@@ -360,13 +367,25 @@ export default function EditorCanvas({
                   width: `${size.width}px`,
                   height: `${size.height}px`
                 }}
+                tabIndex={0}
+                role="button"
+                aria-label="Move Union Bug with arrow keys; hold Shift for larger steps"
+                onKeyDown={moveWithKeyboard}
                 onMouseDown={handleDragStart}
                 onTouchStart={handleDragStart}
                 onClick={(e) => e.stopPropagation()}
               >
-                <img src={bugImageSrc} alt="Union Bug Preview" />
+                <img draggable={false} src={bugImageSrc} alt="Union Bug Preview" />
                 <div 
                   className="bug-resize-handle"
+                  tabIndex={0}
+                  role="slider"
+                  aria-label="Union Bug width; use arrow keys to resize"
+                  aria-valuemin={0.2}
+                  aria-valuemax={2}
+                  aria-valuenow={Number((size.width / canvasScale / 72).toFixed(3))}
+                  aria-valuetext={`${(size.width / canvasScale / 72).toFixed(3)} inches`}
+                  onKeyDown={resizeWithKeyboard}
                   onMouseDown={handleResizeStart}
                   onTouchStart={handleResizeStart}
                 />
@@ -385,11 +404,11 @@ export default function EditorCanvas({
           zIndex: 20
         }}
       >
-        <button className="zoom-btn" onClick={() => onZoomChange(Math.max(0.01, zoom - 0.1))} title="Zoom Out"><ZoomOut size={16} /></button>
+        <button className="zoom-btn" onClick={() => onZoomChange(Math.max(0.01, zoom - 0.1))} aria-label="Zoom out" disabled={zoom <= 0.01} title="Zoom Out"><ZoomOut size={16} /></button>
         <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', minWidth: '45px', textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
-        <button className="zoom-btn" onClick={() => onZoomChange(Math.min(3.0, zoom + 0.1))} title="Zoom In"><ZoomIn size={16} /></button>
+        <button className="zoom-btn" onClick={() => onZoomChange(Math.min(3.0, zoom + 0.1))} aria-label="Zoom in" disabled={zoom >= 3} title="Zoom In"><ZoomIn size={16} /></button>
         <div style={{ width: '1px', height: '16px', background: 'var(--border-color)' }} />
-        <button className="zoom-btn" onClick={handleFitToHeight} title="Fit to Screen"><Maximize2 size={15} /></button>
+        <button className="zoom-btn" onClick={handleFitToHeight} aria-label="Fit to screen" title="Fit to Screen"><Maximize2 size={15} /></button>
       </div>
     </div>
   );

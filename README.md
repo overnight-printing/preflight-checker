@@ -30,8 +30,8 @@ Overnight Preflight Tool helps production teams inspect incoming PDF files, appl
 
 ### PDF preflight
 
-- Runs 11 print-oriented checks against uploaded PDFs.
-- Reports pass, warning, and fixable error counts.
+- Runs 11 print-oriented checks on request, with pass, warning, and error counts.
+- Explains the source-file findings and which corrections are available.
 - Detects common issues involving bleed, image resolution, page size, fonts, colors, transparency, layers, overprint, blank pages, and PDF version.
 - Re-scans the corrected PDF after an automatic fix is applied.
 - Preserves the original upload in memory so the working file can be reset.
@@ -41,7 +41,7 @@ Overnight Preflight Tool helps production teams inspect incoming PDF files, appl
 - Includes a default black Union Bug PDF.
 - Supports replacement with a custom one-page PDF stamp.
 - Keeps the Union Bug as vector artwork during standard PDF export.
-- Provides left, center, and right quick alignment.
+- Provides independent horizontal and vertical alignment and keyboard movement/resizing.
 - Supports direct drag-and-drop positioning and proportional resizing on the canvas.
 - Restricts the rendered Union Bug width to approximately `0.2"`–`2.0"`.
 - Offers automatic black-or-white contrast, an extracted artwork palette, and a custom color picker.
@@ -51,11 +51,10 @@ Overnight Preflight Tool helps production teams inspect incoming PDF files, appl
 
 - Displays CropBox, TrimBox, BleedBox, and MediaBox-derived geometry.
 - Shows final canvas size, final trim size, bleed status, and active page.
-- Adds a `0.125"` / `9 pt` mirrored bleed.
+- Adds configurable mirror bleed, defaulting to `0.125"` / `9 pt`, outside the current artwork.
 - Crops to the PDF TrimBox.
 - Supports a uniform manual crop inset.
-- Provides visual crop guides for each edge.
-- Includes heuristic crop-mark auto-detection.
+- Rejects crop insets that remove the page and preserves vector PDF resources during crop and bleed.
 - Displays trim and `0.125"` safe-zone guides in the editor.
 
 ### Preview and export
@@ -81,10 +80,10 @@ Preflight analysis is available only for PDF artwork. Images can still use the v
 
 ### Requirements
 
-- Node.js 20 or newer is recommended.
+- Node.js 22.13 or newer (Node.js 24 recommended).
 - npm, included with Node.js.
 - A modern browser with Canvas, File API, and Web Worker support.
-- An internet connection when loading PDFs in development or production, because the PDF.js worker is loaded from jsDelivr.
+- The PDF.js worker is bundled with the app; PDF processing requires no CDN connection once app assets are loaded.
 
 ### Install and run
 
@@ -120,7 +119,7 @@ For PDFs:
 
 - The first page opens automatically.
 - Page boxes and physical dimensions are displayed.
-- Preflight analysis starts automatically.
+- Open **Preflight** and click **Analyze PDF** to run the full scan.
 - Multi-page navigation appears when applicable.
 
 For images:
@@ -148,11 +147,11 @@ Some fixes preserve vector content, while others rasterize affected pages at 300
 
 Open **Stamper Settings**, enable **Apply Union Bug**, and then:
 
-1. Choose left, center, or right alignment.
+1. Choose horizontal and vertical alignment with the Align to page controls.
 2. Adjust the scale.
 3. Select Auto Contrast, Palette, or Custom color.
-4. Drag the stamp for exact placement if needed.
-5. Resize it with the canvas handle if needed.
+4. Drag the stamp or focus it and use arrow keys for exact placement (Shift moves in larger steps).
+5. Resize it with the canvas handle or focus the handle and use arrow keys.
 6. For a multi-page PDF, choose which pages should receive the stamp. Move between pages with the page bar and place the stamp separately on each page.
 
 To use a different stamp, expand **Advanced Settings (Change Stamp PDF)** and upload a PDF.
@@ -163,9 +162,7 @@ Use the margin tools as needed:
 
 - **Add 0.125" Mirror Bleed** expands the output by 9 points on all sides and fills the new area with mirrored edge artwork.
 - **Crop to Trim Box** uses the PDF TrimBox as the active page area.
-- **Detect Crop Marks (Visual)** enables independent top, right, bottom, and left crop guides.
-- **Auto-Detect** attempts to find crop marks from rendered pixels.
-- **Manual Crop** applies a uniform inset in inches.
+- **Manual inset**, available under crop settings, applies a uniform inset in inches. Image print dimensions use the chosen **Image resolution** (300 DPI by default).
 - **Safe Zone Guide** shows the trim boundary and a safe area 9 points inside it.
 
 The guides are preview aids. Confirm the displayed final trim and canvas dimensions before exporting.
@@ -203,8 +200,8 @@ Click **Save Production File** for production artwork.
 | Page Size Match | Compares page dimensions with the first page | Warns when dimensions differ by more than 3 pt |
 | Transparency | Inspects transparency groups, opacity, and blend modes | Warns when transparency is detected |
 | Spot Colors | Looks for Separation and DeviceN color spaces | Offers page rasterization |
-| Blank Pages | Flags pages with no extracted text and no XObject artwork | Offers page removal |
-| Hidden Layers | Checks for optional-content configuration in the PDF catalog | Offers layer-structure removal |
+| Blank Pages | Checks PDF.js painting operators, including paths and outlined artwork | Offers removal of the first flagged page while retaining at least one page |
+| Hidden Layers | Checks for optional-content configuration in the PDF catalog | Requests visibility review; removing the catalog alone is unsafe |
 | PDF Version | Reads the PDF header version | Warns below PDF 1.4 |
 
 These checks are practical browser-side heuristics, not a replacement for a RIP, Acrobat Preflight, callas pdfToolbox, or a final press-operator review.
@@ -215,10 +212,10 @@ These checks are practical browser-side heuristics, not a replacement for a RIP,
 | --- | --- | --- |
 | Add Mirror Bleed | Creates a 9 pt mirrored extension around the artwork | Mirrored edges may be visible on artwork with text or distinct edge details |
 | Remove Overprint | Disables `OP` and `op` graphics-state flags | Changes intentional overprint behavior as well as accidental overprint |
-| Outline Fonts | Rasterizes affected pages at 300 DPI | The current implementation does not create vector outlines; text is no longer editable or searchable on rasterized pages |
-| Convert Spot Colors | Rasterizes affected pages at 300 DPI | Output is flattened raster artwork, not a true color-managed CMYK conversion |
+| Rasterize at 300 DPI | Rasterizes all pages to RGB images at 300 DPI | Text loses searchability and editability; this does not create vector outlines |
+| Rasterize to RGB | Rasterizes all pages at 300 DPI | Replaces source color spaces with RGB; this is not a CMYK conversion |
 | Remove Blank Pages | Deletes pages identified by the blank-page heuristic | Visually sparse or structurally unusual pages should be reviewed before removal |
-| Flatten Layers | Removes optional-content configuration | Complex layer behavior may not be reproduced exactly |
+| Optional content layers | Review in a production PDF editor | No automatic flattening is offered |
 
 Always inspect the downloaded file in a production PDF viewer before sending it to print.
 
@@ -226,13 +223,7 @@ Always inspect the downloaded file in a production PDF viewer before sending it 
 
 ### Alignment
 
-**Align horizontally — keep height** moves the stamp left, center, or right while preserving its current vertical position. This is useful after dragging the stamp to the desired height.
-
-**Align to page position** offers nine positions across the page:
-
-- Top left, center, or right
-- Middle left, center, or right
-- Bottom left, center, or right
+**Align to page** offers horizontal left, center, or right alignment and vertical top, middle, or bottom alignment within the safe area. Each control preserves the position on the other axis.
 
 Dragging the stamp switches that page to a custom position.
 
@@ -246,7 +237,7 @@ The scale range is calculated from the uploaded stamp's original width so that t
 - **Palette** extracts dominant colors from the artwork and offers up to five choices.
 - **Custom** accepts any browser color-picker value.
 
-For standard PDF export without bleed or manual crop, the tool modifies supported black/grayscale vector color operators in the stamp PDF and embeds the result as vector artwork. Custom stamp PDFs with unusual color operators or complex structures may not tint completely.
+For PDF export, including bleed and manual crop, the tool modifies supported black/grayscale vector color operators in the stamp PDF and embeds the result as vector artwork. Custom stamp PDFs with unusual color operators or complex structures may not tint completely.
 
 ## Bleed, Trim, Crop, and Safe Zone
 
@@ -261,13 +252,12 @@ All PDF dimensions use PDF points internally:
 
 - Blue or magenta solid line: trim/cut boundary.
 - Cyan dashed line: safe zone, 9 pt inside the trim boundary.
-- Orange line with shaded exterior: active visual crop area.
 
 ### Processing paths
 
 When no bleed or manual/visual crop is active, the application can preserve the original PDF pages and add the Union Bug as a vector overlay.
 
-When mirror bleed or manual/visual cropping is active, pages are rendered through the expanded-output path. This can flatten page artwork. Use the resulting file only after visual quality review.
+Mirror bleed, TrimBox cropping, and manual insets embed and clip the original PDF resources. They preserve vectors and source color spaces. Only the explicitly labeled rasterization fixes flatten PDF artwork.
 
 ## Multi-Page PDFs
 
@@ -279,13 +269,12 @@ Union Bug application options:
 - All Pages
 - Last Page Only
 - First Page Only
-- Even Pages
-- Odd Pages
-- Custom Pages
+- Even or Odd Pages
+- Custom Pages and Ranges (for example `2, 4, 7-10`)
 
-Each page retains its own stamp position and size. Select the pages to stamp, then use the page bar below the preview to visit each one and drag or quick-align the stamp independently. Unvisited selected pages inherit the current placement. Before export, review every page that will receive the stamp, especially when pages have different dimensions or orientations.
+Each visited page retains its own stamp position and size. Export calculates alignment and automatic contrast for each selected page, including pages with different sizes or rotations. The preview shows the stamp only on selected pages.
 
-Crop and bleed settings are global. Visual crop-guide values are currently shared across pages rather than stored independently.
+Crop and bleed settings apply to every page. Invalid page selections and destructive crop settings block export with an explanation.
 
 ## Output Files
 
@@ -318,7 +307,7 @@ npm run preview
 npm run lint
 ```
 
-There is currently no automated test script in `package.json`.
+Run `npm test` for the unit regression suite. See **Verification** below for the browser and PDF checks.
 
 ## Project Structure
 
@@ -364,13 +353,13 @@ The application has no database or server-side upload endpoint. Uploaded file da
 ## Limitations
 
 - PDF preflight results are heuristic and may produce false positives or false negatives.
-- The PDF.js worker is loaded from a third-party CDN; offline PDF loading will fail unless the worker is bundled locally.
+- PDF.js and PDF editing engines load on demand. A first visit still needs access to the hosted app assets; there is no offline app cache.
 - Large or complex PDFs can consume significant browser memory and take longer to render.
 - Encrypted or malformed PDFs may fail to load.
 - Image DPI cannot be inferred reliably without complete physical-size metadata.
 - Automatic crop-mark detection depends on rendered pixel patterns and may require manual adjustment.
-- Crop, bleed, font, and color fixes can rasterize or flatten artwork.
-- The “Outline Fonts” action is rasterization, not true vector font outlining.
+- The font and spot-color rasterization fixes replace pages with RGB images at 300 DPI. Crop and bleed preserve PDF resources.
+- There is no vector font outlining or color-managed CMYK conversion; the available rasterization actions are labeled accordingly.
 - RGB and spot-color detection is not a complete ICC/color-management workflow.
 - The tool does not provide PDF/X validation or output-intent verification.
 - Browser rendering can differ from a commercial RIP.
@@ -395,26 +384,26 @@ npm run dev
 
 ### A PDF stays blank or fails to load
 
-- Confirm that the browser can reach jsDelivr.
+- Confirm that the browser can load the bundled worker asset from your host.
 - Try a current version of Chrome, Edge, Firefox, or Safari.
 - Check whether the PDF is encrypted, damaged, or unusually large.
 - Open the browser developer console for the underlying PDF.js error.
 
 ### The exported PDF looks flattened
 
-Mirror bleed, manual crop, visual crop, and some automatic fixes use rasterization. Disable those options when vector preservation is more important, or perform the equivalent correction in professional prepress software.
+Only the explicit font/spot-color rasterization fixes flatten artwork. Use **Reset Artwork** to restore the original PDF and its source color spaces.
 
 ### The Union Bug color does not change completely
 
 The vector tinting routine targets common black RGB, grayscale, and CMYK operators. Use a simple one-page vector PDF with solid black artwork for the most reliable custom stamp recoloring.
 
-### Auto-detect cannot find crop marks
+### The file contains crop marks
 
-Enable visual crop mode and adjust the top, right, bottom, and left guides manually. Verify the final physical dimensions in the geometry panel.
+Visual crop-mark detection is not currently available. Use the explicit TrimBox and manual inset, then verify output dimensions.
 
 ### The production build reports a large chunk warning
 
-PDF.js and PDF editing libraries add substantial bundle size. The warning does not prevent a successful build. Future optimization can lazy-load PDF-specific modules or configure code splitting.
+PDF.js and PDF editing libraries add substantial bundle size. The warning does not prevent a successful build. PDF engines are loaded on demand and split into separate chunks.
 
 ## Deployment
 
@@ -429,7 +418,7 @@ Deploy the generated `dist/` directory to a static host.
 
 `vite.config.js` automatically uses `/overnight-preflight-tool/` as the base path when the `GITHUB_ACTIONS` environment variable is present. If the GitHub Pages repository path differs, update the configured base path before deployment.
 
-Because this is a client-side application, the host only needs to serve static files. Ensure the deployment's Content Security Policy permits the PDF.js worker request to jsDelivr, or bundle the worker locally.
+Because this is a client-side application, the host only needs to serve static files. Ensure the host serves the bundled `.mjs` worker with a JavaScript content type and allows workers from the same origin.
 
 ## Contributing
 
@@ -445,3 +434,23 @@ npm run build
 ```
 
 No license file is currently included in this repository. Contact the repository owner before redistributing or reusing the project outside its intended scope.
+
+## Verification
+
+Run unit tests, lint, and the production build:
+
+```bash
+npm test
+npm run lint
+npm run build
+```
+
+The browser regression script creates its own fixtures and downloads real app exports. It needs a running development server, Chrome, and Playwright (installed separately from application dependencies):
+
+```bash
+npm install --prefix /tmp/preflight-browser playwright
+PLAYWRIGHT_MODULE=/tmp/preflight-browser/node_modules/playwright node scripts/verify-browser.cjs
+python3 scripts/verify-pdf.py
+```
+
+Outputs, screenshots, and Poppler inspection files are saved under `output/audit/` (ignored by Git). Set `PREFLIGHT_BASE_URL` to change the development-server URL or `PREFLIGHT_AUDIT_OUTPUT` to change the output folder. The PDF verification script requires `pdfinfo`, `pdfimages`, and `pdftoppm`. Visually inspect the rendered PDFs after the automated checks.

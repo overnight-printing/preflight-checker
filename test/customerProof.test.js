@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, degrees } from 'pdf-lib';
 import {
   createCustomerProofPdf,
   normalizeProofId,
@@ -40,4 +40,17 @@ test('creates one customer sheet per source page', async () => {
   assert.deepEqual(proof.getPage(0).getSize(), { width: 612, height: 792 });
   assert.deepEqual(proof.getPage(1).getSize(), { width: 792, height: 612 });
   assert.match(serializedProof, /\/ObjStm/);
+});
+
+test('creates a portrait proof for rotated artwork and tolerates Unicode labels', async () => {
+  const source = await PDFDocument.create();
+  const page = source.addPage([300, 200]);
+  page.setRotation(degrees(90));
+  const bytes = await createCustomerProofPdf({
+    sourcePdfBytes: await source.save(),
+    proofId: 'EST-한글-42',
+    sourceName: '명함.pdf'
+  });
+  const proof = await PDFDocument.load(bytes);
+  assert.deepEqual(proof.getPage(0).getSize(), { width: 612, height: 792 });
 });

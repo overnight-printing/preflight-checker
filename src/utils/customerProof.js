@@ -1,22 +1,19 @@
-import { PDFDocument, PDFName, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, PDFName, StandardFonts, rgb, degrees } from 'pdf-lib';
+import { rotatedSize } from './pdfGeometry.js';
 
 const LETTER_PORTRAIT = [612, 792];
 const LETTER_LANDSCAPE = [792, 612];
 const PAGE_MARGIN = 36;
 
-export function normalizeProofId(value) {
-  return String(value ?? '').trim().replace(/\s+/g, ' ');
-}
-
-export function proofIdForFilename(value) {
-  return normalizeProofId(value)
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || 'proof';
-}
+import { normalizeProofId } from './proofId.js';
+export { normalizeProofId, proofIdForFilename } from './proofId.js';
 
 function fitText(text, font, size, maxWidth) {
-  const normalized = String(text ?? '');
+  // Standard PDF fonts cannot encode every filename character. Preserve the
+  // source artwork and substitute unsupported characters in proof labels only.
+  const normalized = Array.from(String(text ?? '')).map(character => {
+    try { font.encodeText(character); return character; } catch { return '?'; }
+  }).join('');
   if (font.widthOfTextAtSize(normalized, size) <= maxWidth) return normalized;
 
   let result = normalized;
@@ -105,7 +102,10 @@ export async function createCustomerProofPdf({
         opacity: 0
       });
     }
-    const sheetSize = artworkBox.width > artworkBox.height ? LETTER_LANDSCAPE : LETTER_PORTRAIT;
+    const rotation = sourcePage.getRotation().angle;
+    const displayBox = rotatedSize(artworkBox, rotation);
+    const displayTrim = rotatedSize(trimBox, rotation);
+    const sheetSize = displayBox.width > displayBox.height ? LETTER_LANDSCAPE : LETTER_PORTRAIT;
     const [sheetWidth, sheetHeight] = sheetSize;
     const sheet = proofDocument.addPage(sheetSize);
     const embeddedArtwork = await proofDocument.embedPage(sourcePage, {
@@ -126,15 +126,15 @@ export async function createCustomerProofPdf({
       });
     }
     sheet.drawText('CUSTOMER PROOF - REVIEW COPY', {
-      x: logo ? PAGE_MARGIN + 42 : PAGE_MARGIN,
-      y: sheetHeight - 42,
+      x: logo ? PAGE_MARGIN + 58 : PAGE_MARGIN,
+      y: sheetHeight - 30,
       size: 15,
       font: boldFont,
       color: rgb(0.12, 0.2, 0.48)
     });
-    sheet.drawText(`Proof ID: ${fitText(normalizedProofId, boldFont, 10, 210)}`, {
-      x: sheetWidth - PAGE_MARGIN - 210,
-      y: sheetHeight - 40,
+    sheet.drawText(`Proof ID: ${fitText(normalizedProofId, boldFont, 10, sheetWidth - 2 * PAGE_MARGIN - 58)}`, {
+      x: logo ? PAGE_MARGIN + 58 : PAGE_MARGIN,
+      y: sheetHeight - 49,
       size: 10,
       font: boldFont,
       color: rgb(0.12, 0.15, 0.2)
@@ -160,7 +160,7 @@ export async function createCustomerProofPdf({
       font: regularFont,
       color: rgb(0.25, 0.28, 0.34)
     });
-    sheet.drawText(`Page ${index + 1} of ${sourcePages.length}  |  Finished size: ${formatDimensions(trimBox)}  |  Bleed: ${formatBleed(trimBox, artworkBox)}`, {
+    sheet.drawText(`Page ${index + 1} of ${sourcePages.length}  |  Finished size: ${formatDimensions(displayTrim)}  |  Bleed: ${formatBleed(trimBox, artworkBox)}`, {
       x: PAGE_MARGIN,
       y: sheetHeight - 97,
       size: 9,
@@ -193,9 +193,9 @@ export async function createCustomerProofPdf({
     const previewBottom = 101;
     const previewWidth = sheetWidth - (PAGE_MARGIN * 2);
     const previewHeight = previewTop - previewBottom;
-    const scale = Math.min(previewWidth / artworkBox.width, previewHeight / artworkBox.height);
-    const artworkWidth = artworkBox.width * scale;
-    const artworkHeight = artworkBox.height * scale;
+    const scale = Math.min(previewWidth / displayBox.width, previewHeight / displayBox.height);
+    const artworkWidth = displayBox.width * scale;
+    const artworkHeight = displayBox.height * scale;
     const artworkX = (sheetWidth - artworkWidth) / 2;
     const artworkY = previewBottom + ((previewHeight - artworkHeight) / 2);
 
@@ -208,17 +208,27 @@ export async function createCustomerProofPdf({
       borderColor: rgb(0.35, 0.38, 0.43),
       color: rgb(1, 1, 1)
     });
+    const angle = ((rotation % 360) + 360) % 360;
+    // Rotate the embedded source clockwise to match its browser preview.
+    const anchorX = angle === 180 || angle === 270 ? artworkX + artworkWidth : artworkX;
+    const anchorY = angle === 90 || angle === 180 ? artworkY + artworkHeight : artworkY;
     sheet.drawPage(embeddedArtwork, {
-      x: artworkX,
-      y: artworkY,
-      width: artworkWidth,
-      height: artworkHeight
+      x: anchorX, y: anchorY,
+      width: artworkBox.width * scale, height: artworkBox.height * scale,
+      rotate: degrees(-angle)
     });
+    // Use rotated corners to get the cut rectangle in display coordinates.
+    const corners = [
+      [trimBox.x - artworkBox.x, trimBox.y - artworkBox.y],
+      [trimBox.x - artworkBox.x + trimBox.width, trimBox.y - artworkBox.y + trimBox.height]
+    ].map(([x, y]) => angle === 90 ? [y, artworkBox.width - x]
+      : angle === 180 ? [artworkBox.width - x, artworkBox.height - y]
+      : angle === 270 ? [artworkBox.height - y, x] : [x, y]);
     sheet.drawRectangle({
-      x: artworkX + ((trimBox.x - artworkBox.x) * scale),
-      y: artworkY + ((trimBox.y - artworkBox.y) * scale),
-      width: trimBox.width * scale,
-      height: trimBox.height * scale,
+      x: artworkX + Math.min(...corners.map(corner => corner[0])) * scale,
+      y: artworkY + Math.min(...corners.map(corner => corner[1])) * scale,
+      width: displayTrim.width * scale,
+      height: displayTrim.height * scale,
       borderWidth: 1.5,
       borderColor: rgb(0.86, 0.08, 0.48),
       borderDashArray: [5, 3]

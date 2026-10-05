@@ -63,6 +63,9 @@ export default function ControlPanel({
   showSafeLine,
   bleedEnabled,
   sourceHasBleed = false,
+  isPdf = true,
+  imageDpi = 300,
+  onImageDpiChange,
   onBleedToggle,
   bleedAmount,
   onBleedAmountChange,
@@ -128,13 +131,22 @@ export default function ControlPanel({
         activeSection={activeSection}
         onToggle={toggleSection}
       >
+        {!isPdf && (
+          <div className="select-field">
+            <label className="field-label" htmlFor="image-dpi">Image resolution</label>
+            <select id="image-dpi" value={imageDpi} onChange={event => onImageDpiChange(Number(event.target.value))}>
+              {[72, 96, 150, 300, 600, 1200].map(dpi => <option key={dpi} value={dpi}>{dpi} DPI</option>)}
+            </select>
+            <p className="field-help">Sets the physical print size and bleed. Choose the resolution intended for this artwork.</p>
+          </div>
+        )}
         <div className="setting-row">
           <div className="setting-copy">
             <strong>{sourceHasBleed ? 'Preserve and extend bleed' : 'Add mirror bleed'}</strong>
             <span>{sourceHasBleed ? 'Existing PDF bleed stays intact.' : 'Mirror artwork beyond each edge.'}</span>
           </div>
           <label className="switch">
-            <input type="checkbox" checked={bleedEnabled} onChange={onBleedToggle} />
+            <input type="checkbox" aria-label="Add mirror bleed" checked={bleedEnabled} onChange={onBleedToggle} />
             <span className="slider-switch" />
           </label>
         </div>
@@ -181,11 +193,11 @@ export default function ControlPanel({
 
         <div className="setting-row">
           <div className="setting-copy">
-            <strong>Crop to trim box</strong>
-            <span>Use the document trim boundary.</span>
+            <strong>{isPdf ? 'Crop to trim box' : 'Crop artwork'}</strong>
+            <span>{isPdf ? 'Use the document trim boundary.' : 'Inset all four edges equally.'}</span>
           </div>
           <label className="switch">
-            <input type="checkbox" checked={trimCropEnabled} onChange={onTrimCropToggle} />
+            <input type="checkbox" aria-label="Crop to trim box" checked={trimCropEnabled} onChange={onTrimCropToggle} />
             <span className="slider-switch" />
           </label>
         </div>
@@ -197,7 +209,7 @@ export default function ControlPanel({
               <span>{(manualCropAmount / 72).toFixed(3)}"</span>
             </div>
             <div className="stepper-control">
-              <button type="button" onClick={() => onManualCropChange(Math.max(0, manualCropAmount - 0.072))}>−</button>
+              <button type="button" aria-label="Decrease crop inset" onClick={() => onManualCropChange(Math.max(0, manualCropAmount - 0.072))}>−</button>
               <input
                 id="manual-crop"
                 type="number"
@@ -206,10 +218,10 @@ export default function ControlPanel({
                 value={(manualCropAmount / 72).toFixed(3)}
                 onChange={(event) => {
                   const value = Number(event.target.value);
-                  if (Number.isFinite(value)) onManualCropChange(value * 72);
+                  if (Number.isFinite(value)) onManualCropChange(Math.max(0, value) * 72);
                 }}
               />
-              <button type="button" onClick={() => onManualCropChange(manualCropAmount + 0.072)}>+</button>
+              <button type="button" aria-label="Increase crop inset" onClick={() => onManualCropChange(manualCropAmount + 0.072)}>+</button>
             </div>
           </div>
         )}
@@ -220,7 +232,7 @@ export default function ControlPanel({
             <span>Show trim and safety boundaries.</span>
           </div>
           <label className="switch">
-            <input type="checkbox" checked={showSafeLine} onChange={onShowSafeLineToggle} />
+            <input type="checkbox" aria-label="Show safe zone guide" checked={showSafeLine} onChange={onShowSafeLineToggle} />
             <span className="slider-switch" />
           </label>
         </div>
@@ -239,7 +251,7 @@ export default function ControlPanel({
             <span>Add the approved vector mark.</span>
           </div>
           <label className="switch">
-            <input type="checkbox" checked={bugEnabled} onChange={onBugEnabledToggle} />
+            <input type="checkbox" aria-label="Apply Union Bug" checked={bugEnabled} onChange={onBugEnabledToggle} />
             <span className="slider-switch" />
           </label>
         </div>
@@ -252,6 +264,7 @@ export default function ControlPanel({
             </div>
             <input
               type="range"
+              aria-label="Union Bug size"
               min={minScale}
               max={maxScale}
               value={bugScale}
@@ -267,6 +280,7 @@ export default function ControlPanel({
               ].map(([mode, label]) => (
                 <button
                   type="button"
+                  aria-pressed={colorMode === mode}
                   key={mode}
                   className={colorMode === mode ? 'active' : ''}
                   onClick={() => onColorModeChange(mode)}
@@ -288,6 +302,7 @@ export default function ControlPanel({
                 {extractedColors.map((color) => (
                   <button
                     type="button"
+                    aria-pressed={selectedColor.toLowerCase() === color.toLowerCase()}
                     key={color}
                     className={`color-option ${selectedColor.toLowerCase() === color.toLowerCase() ? 'active' : ''}`}
                     style={{ backgroundColor: color }}
@@ -304,6 +319,7 @@ export default function ControlPanel({
               <label className="color-picker-wrapper">
                 <input
                   type="color"
+                  aria-label="Custom Union Bug color"
                   className="color-picker-input"
                   value={selectedColor}
                   onChange={(event) => onColorSelect(event.target.value)}
@@ -348,7 +364,7 @@ export default function ControlPanel({
                 <span>Display placement guides.</span>
               </div>
               <label className="switch">
-                <input type="checkbox" checked={showGrid} onChange={onShowGridToggle} />
+                <input type="checkbox" aria-label="Show placement grid" checked={showGrid} onChange={onShowGridToggle} />
                 <span className="slider-switch" />
               </label>
             </div>
@@ -359,7 +375,7 @@ export default function ControlPanel({
                 <span>Snap while dragging the mark.</span>
               </div>
               <label className="switch">
-                <input type="checkbox" checked={snapToGrid} onChange={onSnapToGridToggle} />
+                <input type="checkbox" aria-label="Snap to grid" checked={snapToGrid} onChange={onSnapToGridToggle} />
                 <span className="slider-switch" />
               </label>
             </div>
@@ -371,6 +387,7 @@ export default function ControlPanel({
                   {[0.0625, 0.125, 0.25].map((size) => (
                     <button
                       type="button"
+                      aria-pressed={gridSize === size}
                       key={size}
                       className={gridSize === size ? 'active' : ''}
                       onClick={() => onGridSizeChange(size)}
@@ -388,6 +405,7 @@ export default function ControlPanel({
               <div className="select-field">
                 <span className="field-label">Apply to pages</span>
                 <select
+                  aria-label="Apply Union Bug to pages"
                   value={multiPageOptions.applyTo}
                   onChange={(event) => onMultiPageOptionsChange({ ...multiPageOptions, applyTo: event.target.value })}
                 >

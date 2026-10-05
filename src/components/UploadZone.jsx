@@ -8,6 +8,7 @@ export default function UploadZone({
   selectedFile,
   description,
   onClear, // Optional callback to clear the file
+  disabled = false,
   icon: Icon = Upload
 }) {
   const [isDragActive, setIsDragActive] = useState(false);
@@ -27,6 +28,7 @@ export default function UploadZone({
   const validateFile = (file) => {
     setError('');
     if (!file) return false;
+    if (file.size === 0) { setError('This file is empty. Choose another file.'); return false; }
 
     // Check extensions
     const fileExtension = file.name.split('.').pop().toLowerCase();
@@ -44,6 +46,7 @@ export default function UploadZone({
     e.preventDefault();
     e.stopPropagation();
     setIsDragActive(false);
+    if (disabled) return;
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0];
@@ -65,7 +68,7 @@ export default function UploadZone({
   };
 
   const onButtonClick = () => {
-    fileInputRef.current.click();
+    if (!disabled) fileInputRef.current.click();
   };
 
   return (
@@ -91,6 +94,8 @@ export default function UploadZone({
             <button 
               className="btn btn-secondary btn-icon-only" 
               onClick={onButtonClick}
+              disabled={disabled}
+              aria-label={`Change ${label}`}
               title="Change File"
             >
               <RefreshCw size={14} />
@@ -102,6 +107,8 @@ export default function UploadZone({
                   e.stopPropagation();
                   onClear();
                 }}
+                disabled={disabled}
+                aria-label={`Remove ${label}`}
                 title="Remove File"
               >
                 <X size={14} />
@@ -110,7 +117,10 @@ export default function UploadZone({
           </div>
         </div>
       ) : (
-        <div
+        <button
+          type="button"
+          disabled={disabled}
+          aria-label={`Upload ${label}`}
           className={`dropzone ${isDragActive ? 'active' : ''}`}
           onDragEnter={handleDrag}
           onDragOver={handleDrag}
@@ -122,27 +132,17 @@ export default function UploadZone({
           <h5>Click or drag {label} here</h5>
           {description && <p>{description}</p>}
           
-          {error && (
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '6px', 
-              color: 'var(--danger)', 
-              fontSize: '11px', 
-              marginTop: '4px',
-              fontWeight: '500'
-            }}>
-              <AlertCircle size={12} />
-              <span>{error}</span>
-            </div>
-          )}
-        </div>
+
+        </button>
       )}
+      {error && <p className="field-error upload-error" role="alert"><AlertCircle size={14} />{error}</p>}
 
       <input
         ref={fileInputRef}
         type="file"
         style={{ display: 'none' }}
+        disabled={disabled}
+        aria-label={label}
         accept={accept}
         onChange={handleChange}
       />

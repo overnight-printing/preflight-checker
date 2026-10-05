@@ -1,5 +1,7 @@
 import { PDFDocument, PDFName, PDFRawStream, PDFArray, PDFDict, PDFBool, PDFNumber } from 'pdf-lib';
 import { decodePDFRawStream } from 'pdf-lib/es/core/streams/decode';
+import { OPS } from 'pdfjs-dist';
+import { rotatedSize } from './pdfGeometry';
 
 // Expected sizes helper removed - page size consistency check used instead.
 
@@ -19,8 +21,9 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   
   const firstPage = pages[0];
   const firstBox = firstPage ? (firstPage.getTrimBox() || firstPage.getCropBox() || firstPage.getMediaBox() || { x: 0, y: 0, width: 0, height: 0 }) : { x: 0, y: 0, width: 0, height: 0 };
-  const firstPageW = firstBox.width;
-  const firstPageH = firstBox.height;
+  const firstSize = rotatedSize(firstBox, firstPage?.getRotation().angle);
+  const firstPageW = firstSize.width;
+  const firstPageH = firstSize.height;
   
   const lookup = (ref) => pdfDoc.context.lookup(ref);
   
@@ -44,7 +47,7 @@ export async function runPreflightChecks(file, pdfjsDoc) {
       transparency: { status: 'pass', details: 'No unflattened transparency detected', value: null },
       spotColors: { status: 'pass', details: 'No spot colors detected', value: [], fixable: true },
       blankPages: { status: 'pass', details: 'No blank pages detected', value: [], fixable: true },
-      hiddenLayers: { status: 'pass', details: 'No hidden layers detected', value: null, fixable: true },
+      hiddenLayers: { status: 'pass', details: 'No optional content layers detected', value: null },
       pdfVersionCheck: { status: 'pass', details: 'PDF version is 1.4 or higher', value: null }
     }
   };
@@ -79,35 +82,34 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   if (catalog.has(PDFName.of('OCProperties'))) {
     results.checks.hiddenLayers = {
       status: 'warning',
-      details: 'Optional content layers (OCGs) detected. Layers can cause rendering errors; recommend flattening.',
+      details: 'Optional content layers detected. Review layer visibility in a production PDF editor before printing.',
       value: true,
-      fixable: true
+      fixable: false
     };
   }
 
   // 3. Scan all indirect objects for global checks (Overprint, Transparency)
-  const indirectObjects = pdfDoc.context.enumerateIndirectObjects();
-  for (const [, obj] of indirectObjects) {
-    if (!(obj instanceof PDFDict)) continue;
+  for (const dict of collectPdfDictionaries(pdfDoc)) {
 
-    const type = obj.get(PDFName.of('Type'));
+    const type = dict.get(PDFName.of('Type'));
 
     // Check Overprint
-    if (type === PDFName.of('ExtGState')) {
-      const OP = obj.get(PDFName.of('OP'));
-      const op = obj.get(PDFName.of('op'));
+    if (type === PDFName.of('ExtGState') || ['OP', 'op', 'ca', 'CA', 'BM', 'SMask'].some(key => dict.has(PDFName.of(key)))) {
+      const OP = dict.get(PDFName.of('OP'));
+      const op = dict.get(PDFName.of('op'));
       if (OP?.value === true || op?.value === true) {
         hasOverprint = true;
       }
 
       // Check Transparency via ExtGState opacity
-      const ca = obj.get(PDFName.of('ca'));
-      const CA = obj.get(PDFName.of('CA'));
-      const BM = obj.get(PDFName.of('BM'));
+      const ca = dict.get(PDFName.of('ca'));
+      const CA = dict.get(PDFName.of('CA'));
+      const BM = dict.get(PDFName.of('BM'));
       if (
         (ca instanceof PDFNumber && ca.value < 1.0) ||
         (CA instanceof PDFNumber && CA.value < 1.0) ||
-        (BM && BM.toString() !== '/Normal' && BM.toString() !== '/Compatible')
+        (BM && BM.toString() !== '/Normal' && BM.toString() !== '/Compatible') ||
+        (dict.has(PDFName.of('SMask')) && dict.get(PDFName.of('SMask')).toString() !== '/None')
       ) {
         hasTransparency = true;
       }
@@ -117,9 +119,20 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   // Scan resource dictionaries of all pages specifically for Fonts, ColorSpace and Images
   for (let idx = 0; idx < numPages; idx++) {
     const page = pages[idx];
-    const resources = lookup(page.node.get(PDFName.of('Resources')));
-    
-    if (resources instanceof PDFDict) {
+    const resourceSets = [];
+    const visited = new Set();
+    const collectResources = (resources) => {
+      if (!(resources instanceof PDFDict) || visited.has(resources)) return;
+      visited.add(resources);
+      resourceSets.push(resources);
+      const xObjects = lookup(resources.get(PDFName.of('XObject')));
+      if (xObjects instanceof PDFDict) for (const key of xObjects.keys()) {
+        const form = lookup(xObjects.get(key));
+        if (form instanceof PDFRawStream) collectResources(lookup(form.dict.get(PDFName.of('Resources'))));
+      }
+    };
+    collectResources(page.node.Resources());
+    for (const resources of resourceSets) {
       // Check Fonts referenced by this page
       const fonts = lookup(resources.get(PDFName.of('Font')));
       if (fonts instanceof PDFDict) {
@@ -130,19 +143,14 @@ export async function runPreflightChecks(file, pdfjsDoc) {
             const fontName = fontObj.get(PDFName.of('BaseFont'))?.toString() || 'Unnamed Font';
             
             if (subtype !== PDFName.of('Type3')) {
-              const fontDescriptor = lookup(fontObj.get(PDFName.of('FontDescriptor')));
-              let isEmbedded = false;
-              
-              if (fontDescriptor instanceof PDFDict) {
-                if (
-                  fontDescriptor.has(PDFName.of('FontFile')) ||
-                  fontDescriptor.has(PDFName.of('FontFile2')) ||
-                  fontDescriptor.has(PDFName.of('FontFile3'))
-                ) {
-                  isEmbedded = true;
-                }
-              }
-              
+              const descendants = lookup(fontObj.get(PDFName.of('DescendantFonts')));
+              const fontPrograms = descendants instanceof PDFArray
+                ? descendants.asArray().map(lookup) : [fontObj];
+              const isEmbedded = fontPrograms.length > 0 && fontPrograms.every((font) => {
+                const descriptor = font instanceof PDFDict && lookup(font.get(PDFName.of('FontDescriptor')));
+                return descriptor instanceof PDFDict && ['FontFile', 'FontFile2', 'FontFile3'].some(key => descriptor.has(PDFName.of(key)));
+              });
+
               if (!isEmbedded) {
                 nonEmbeddedFonts.add(fontName.replace('/', ''));
               }
@@ -156,6 +164,7 @@ export async function runPreflightChecks(file, pdfjsDoc) {
       if (colorSpaces instanceof PDFDict) {
         for (const key of colorSpaces.keys()) {
           const csVal = lookup(colorSpaces.get(key));
+          if (isRgbColorSpace(csVal, lookup)) hasRGBContent = true;
           if (csVal instanceof PDFArray) {
             const csName = csVal.get(0).toString();
             if (csName === '/Separation' || csName === '/DeviceN') {
@@ -186,7 +195,7 @@ export async function runPreflightChecks(file, pdfjsDoc) {
     const bleedBox = page.getBleedBox() || cropBox;
     
     // Compare CropBox/TrimBox width & height with the first page
-    const compareBox = trimBox || cropBox;
+    const compareBox = rotatedSize(trimBox || cropBox, page.getRotation().angle);
     const widthDiff = Math.abs(compareBox.width - firstPageW);
     const heightDiff = Math.abs(compareBox.height - firstPageH);
     if (widthDiff > 3.0 || heightDiff > 3.0) {
@@ -205,9 +214,10 @@ export async function runPreflightChecks(file, pdfjsDoc) {
     if (!trimBox) {
       hasInsufficientBleed = true; // Missing TrimBox = no bleed defined
     } else {
-      const bleedWidth = (bleedBox.width - trimBox.width) / 2;
-      const bleedHeight = (bleedBox.height - trimBox.height) / 2;
-      if (bleedWidth < 8.9 || bleedHeight < 8.9) {
+      const margins = [trimBox.x - bleedBox.x, trimBox.y - bleedBox.y,
+        bleedBox.x + bleedBox.width - trimBox.x - trimBox.width,
+        bleedBox.y + bleedBox.height - trimBox.y - trimBox.height];
+      if (margins.some(value => value < 8.9)) {
         hasInsufficientBleed = true;
       }
     }
@@ -222,86 +232,58 @@ export async function runPreflightChecks(file, pdfjsDoc) {
     }
 
     // Image Resolution checks
-    const resources = lookup(page.node.get(PDFName.of('Resources')));
+    const resources = page.node.Resources();
     const contentStreamText = await getPageContentStreamText(page, pdfDoc);
-    const renderedSizes = parseContentStreamForXObjects(contentStreamText);
+    if (/(?:^|\s)(?:rg|RG)(?:\s|$)/.test(contentStreamText)) hasRGBContent = true;
 
-    if (resources instanceof PDFDict) {
-      const xObjects = lookup(resources.get(PDFName.of('XObject')));
-      if (xObjects instanceof PDFDict) {
-        for (const key of xObjects.keys()) {
-          const xObj = lookup(xObjects.get(key));
-          if (xObj instanceof PDFRawStream) {
-            const subtype = xObj.dict.get(PDFName.of('Subtype'));
-            if (subtype === PDFName.of('Image')) {
-              totalImages++;
-              const pWidth = xObj.dict.get(PDFName.of('Width'))?.value || 0;
-              const pHeight = xObj.dict.get(PDFName.of('Height'))?.value || 0;
-              const nameClean = key.toString().replace('/', '');
-              
-              // Find rendered sizes
-              const draws = renderedSizes[nameClean] || [];
-              let activeDPI = 300; // default assumption if not drawn or fallback
-              
-              if (draws.length > 0) {
-                // Compute min DPI among all times it was drawn on the page
-                for (const draw of draws) {
-                  const dpiX = (pWidth / draw.width) * 72;
-                  const dpiY = (pHeight / draw.height) * 72;
-                  const dpi = Math.min(dpiX, dpiY);
-                  if (dpi < activeDPI) activeDPI = dpi;
-                }
-              } else {
-                // Fallback: compare pixel dimensions to page size in points
-                const pageW = cropBox.width;
-                const pageH = cropBox.height;
-                const dpiX = (pWidth / pageW) * 72;
-                const dpiY = (pHeight / pageH) * 72;
-                activeDPI = Math.min(dpiX, dpiY);
-              }
-
-              if (activeDPI < minDPI) minDPI = activeDPI;
-              if (activeDPI < 300) {
-                hasLowRes = true;
-              }
-
-              // Check if image colorspace is RGB
-              const cs = lookup(xObj.dict.get(PDFName.of('ColorSpace')));
-              if (cs) {
-                if (cs.toString() === '/DeviceRGB' || cs.toString() === '/CalRGB') {
-                  hasRGBContent = true;
-                } else if (cs instanceof PDFArray && (cs.get(0).toString() === '/DeviceRGB' || cs.get(0).toString() === '/CalRGB')) {
-                  hasRGBContent = true;
-                }
-              }
-            }
+    const scanImages = (resourceDict, streamText, matrix = [1, 0, 0, 1], ancestors = new Set()) => {
+      if (!(resourceDict instanceof PDFDict)) return;
+      const drawsByName = parseContentStreamForXObjects(streamText, matrix);
+      const xObjects = lookup(resourceDict.get(PDFName.of('XObject')));
+      if (!(xObjects instanceof PDFDict)) return;
+      for (const key of xObjects.keys()) {
+        const object = lookup(xObjects.get(key));
+        if (!(object instanceof PDFRawStream) || ancestors.has(object)) continue;
+        const draws = drawsByName[key.toString().slice(1)] || [];
+        if (object.dict.get(PDFName.of('Subtype')) === PDFName.of('Form')) {
+          const formResources = lookup(object.dict.get(PDFName.of('Resources'))) || resourceDict;
+          const formMatrix = lookup(object.dict.get(PDFName.of('Matrix')));
+          const transform = formMatrix instanceof PDFArray ? formMatrix.asArray().map(value => lookup(value).asNumber()) : [1, 0, 0, 1];
+          let formText;
+          try { formText = new TextDecoder('latin1').decode(decodePDFRawStream(object).decode()); }
+          catch { continue; }
+          if (/(?:^|\s)(?:rg|RG)(?:\s|$)/.test(formText)) hasRGBContent = true;
+          for (const draw of draws) scanImages(formResources, formText, multiplyLinearMatrices(draw.matrix, transform), new Set(ancestors).add(object));
+        } else if (object.dict.get(PDFName.of('Subtype')) === PDFName.of('Image') && draws.length > 0) {
+          totalImages++;
+          const width = object.dict.get(PDFName.of('Width'))?.asNumber() || 0;
+          const height = object.dict.get(PDFName.of('Height'))?.asNumber() || 0;
+          for (const draw of draws) {
+            const dpi = Math.min(width / draw.width, height / draw.height) * 72;
+            if (Number.isFinite(dpi)) { minDPI = Math.min(minDPI, dpi); if (dpi < 300) hasLowRes = true; }
           }
+          const cs = lookup(object.dict.get(PDFName.of('ColorSpace')));
+          if (isRgbColorSpace(cs, lookup)) hasRGBContent = true;
+          if (object.dict.has(PDFName.of('SMask'))) hasTransparency = true;
         }
       }
-    }
+    };
+    scanImages(resources, contentStreamText);
 
-    // 5. Scan for Blank Pages using PDF.js and pixel analysis
+    // Drawing operators include outlined text, paths, shadings, and inline images.
+    // Missing text and XObjects alone is not evidence that a page is blank.
     const pdfjsPage = await pdfjsDoc.getPage(pageNum);
-    const textContent = await pdfjsPage.getTextContent();
-    const hasText = textContent.items.length > 0;
-    
-    // Check if page has no images or forms either
-    let hasArtworkObjects = false;
-    if (resources instanceof PDFDict) {
-      const xObjects = lookup(resources.get(PDFName.of('XObject')));
-      if (xObjects instanceof PDFDict) {
-        hasArtworkObjects = xObjects.keys().length > 0;
-      }
-    }
-
-    if (!hasText && !hasArtworkObjects) {
-      // Highly suspect of being blank! Let's flag it.
-      blankPagesList.push(pageNum);
-    } else if (!hasText) {
-      // Has some objects but no text. Let's do a fast canvas rendering check if possible.
-      // We will perform pixel analysis in the browser side if needed, but for preflightChecker,
-      // flagging no text + no path objects as blank is a solid heuristic. Let's make it robust.
-    }
+    const operatorList = await pdfjsPage.getOperatorList();
+    const paintOperators = new Set([
+      OPS.stroke, OPS.closeStroke, OPS.fill, OPS.eoFill, OPS.fillStroke,
+      OPS.eoFillStroke, OPS.closeFillStroke, OPS.closeEOFillStroke, OPS.shadingFill, OPS.rawFillPath,
+      OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintImageMaskXObject,
+      OPS.paintImageMaskXObjectGroup, OPS.paintImageMaskXObjectRepeat, OPS.paintImageXObjectRepeat,
+      OPS.paintInlineImageXObjectGroup, OPS.paintSolidColorImageMask,
+      OPS.showText, OPS.showSpacedText, OPS.nextLineShowText, OPS.nextLineSetSpacingShowText
+    ]);
+    if (!operatorList.fnArray.some((op, index) => paintOperators.has(op) ||
+      (op === OPS.constructPath && paintOperators.has(operatorList.argsArray[index]?.[0])))) blankPagesList.push(pageNum);
   }
 
   // Update Bleed Check Status
@@ -339,7 +321,7 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   if (hasOverprint) {
     results.checks.overprint = {
       status: 'error',
-      details: 'Unintended overprint settings detected. Overprinting can cause colors to blend unexpectedly on press.',
+      details: 'Overprint settings detected. Review whether they are intentional. Overprinting can cause colors to blend unexpectedly on press.',
       value: true,
       fixable: true
     };
@@ -359,7 +341,7 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   if (hasRGBContent) {
     results.checks.colorMode = {
       status: 'warning',
-      details: 'RGB colors or RGB images detected. Digital RGB content will be converted to process CMYK, causing color shifts.',
+      details: 'RGB colors or RGB images detected. Review color management before printing; this tool does not convert RGB to CMYK.',
       value: 'RGB'
     };
   }
@@ -374,7 +356,7 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   if (hasPageSizeMismatch) {
     results.checks.pageSize = {
       status: 'warning',
-      details: `Page size mismatch. Page 1: ${sizeStr}, ${mismatchPageNum}Page: ${mismatchSizeStr}.`,
+      details: `Page size mismatch. Page 1: ${sizeStr}, Page ${mismatchPageNum}: ${mismatchSizeStr}.`,
       value: { firstPageSize: sizeStr, mismatchPageNum, mismatchSize: mismatchSizeStr }
     };
   } else {
@@ -398,7 +380,7 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   if (spotColorsFound.size > 0) {
     results.checks.spotColors = {
       status: 'warning',
-      details: `Spot colors detected: ${Array.from(spotColorsFound).join(', ')}. Spot colors require custom ink plates. Convert to CMYK?`,
+      details: `Spot colors detected: ${Array.from(spotColorsFound).join(', ')}. Spot colors may require separate ink plates. Review with your printer; rasterization converts to RGB.`,
       value: Array.from(spotColorsFound),
       fixable: true
     };
@@ -410,7 +392,7 @@ export async function runPreflightChecks(file, pdfjsDoc) {
       status: 'warning',
       details: `Blank pages detected: Page(s) ${blankPagesList.join(', ')}. Blank pages should be removed prior to print submission.`,
       value: blankPagesList,
-      fixable: true
+      fixable: numPages > 1
     };
   }
 
@@ -421,7 +403,7 @@ export async function runPreflightChecks(file, pdfjsDoc) {
  * Decodes page content stream as UTF-8 string.
  */
 async function getPageContentStreamText(page, pdfDoc) {
-  const contents = page.node.get(PDFName.of('Contents'));
+  const contents = pdfDoc.context.lookup(page.node.get(PDFName.of('Contents')));
   if (!contents) return '';
   
   const lookup = (ref) => pdfDoc.context.lookup(ref);
@@ -448,13 +430,47 @@ async function getPageContentStreamText(page, pdfDoc) {
   return contentText;
 }
 
+function collectPdfDictionaries(document) {
+  const dictionaries = [];
+  const visited = new Set();
+  const visit = value => {
+    const object = document.context.lookup(value);
+    if (!object || visited.has(object)) return;
+    visited.add(object);
+    const dictionary = object instanceof PDFRawStream ? object.dict : object;
+    if (dictionary instanceof PDFDict) {
+      dictionaries.push(dictionary);
+      dictionary.keys().forEach(key => visit(dictionary.get(key)));
+    } else if (object instanceof PDFArray) object.asArray().forEach(visit);
+  };
+  visit(document.catalog);
+  return dictionaries;
+}
+
+function multiplyLinearMatrices(parent, local) {
+  return [parent[0] * local[0] + parent[2] * local[1], parent[1] * local[0] + parent[3] * local[1],
+    parent[0] * local[2] + parent[2] * local[3], parent[1] * local[2] + parent[3] * local[3]];
+}
+
+function isRgbColorSpace(space, lookup) {
+  if (space?.toString() === '/DeviceRGB' || space?.toString() === '/CalRGB') return true;
+  if (!(space instanceof PDFArray)) return false;
+  const type = space.get(0)?.toString();
+  if (type === '/ICCBased') {
+    const profile = lookup(space.get(1));
+    return profile instanceof PDFRawStream && profile.dict.get(PDFName.of('N'))?.asNumber() === 3;
+  }
+  if (type === '/Indexed') return isRgbColorSpace(lookup(space.get(1)), lookup);
+  return type === '/DeviceRGB' || type === '/CalRGB';
+}
+
 /**
  * Simple parser to extract drawing coordinates and CTM matrices for XObjects.
  */
-function parseContentStreamForXObjects(contentStreamText) {
+function parseContentStreamForXObjects(contentStreamText, initialMatrix = [1, 0, 0, 1]) {
   const renderedSizes = {};
   const stateStack = [];
-  let currentMatrix = [1, 0, 0, 1, 0, 0];
+  let currentMatrix = [...initialMatrix];
   
   const tokens = contentStreamText.split(/\s+/);
   let i = 0;
@@ -495,7 +511,7 @@ function parseContentStreamForXObjects(contentStreamText) {
         if (!renderedSizes[name]) {
           renderedSizes[name] = [];
         }
-        renderedSizes[name].push({ width: w, height: h });
+        renderedSizes[name].push({ width: w, height: h, matrix: [...currentMatrix] });
       }
     }
     i++;
@@ -515,35 +531,13 @@ function parseContentStreamForXObjects(contentStreamText) {
  */
 export async function fixOverprint(arrayBuffer) {
   const pdfDoc = await PDFDocument.load(arrayBuffer);
-  const indirectObjects = pdfDoc.context.enumerateIndirectObjects();
-  
-  for (const [, obj] of indirectObjects) {
-    if (obj instanceof PDFDict) {
-      if (obj.get(PDFName.of('Type')) === PDFName.of('ExtGState') || 
-          (obj.has(PDFName.of('OP')) || obj.has(PDFName.of('op')))) {
-        obj.set(PDFName.of('OP'), PDFBool.False);
-        obj.set(PDFName.of('op'), PDFBool.False);
-        obj.set(PDFName.of('OPM'), PDFNumber.of(0));
-      }
+  for (const dict of collectPdfDictionaries(pdfDoc)) {
+    if (dict.get(PDFName.of('Type')) === PDFName.of('ExtGState') || dict.has(PDFName.of('OP')) || dict.has(PDFName.of('op'))) {
+      dict.set(PDFName.of('OP'), PDFBool.False);
+      dict.set(PDFName.of('op'), PDFBool.False);
+      dict.set(PDFName.of('OPM'), PDFNumber.of(0));
     }
   }
-  return await pdfDoc.save();
-}
-
-/**
- * Removes hidden layers structure from the PDF catalog.
- * 
- * @param {ArrayBuffer} arrayBuffer - The PDF file as arrayBuffer
- * @returns {Promise<Uint8Array>} Corrected PDF bytes
- */
-export async function fixHiddenLayers(arrayBuffer) {
-  const pdfDoc = await PDFDocument.load(arrayBuffer);
-  const catalog = pdfDoc.catalog;
-  
-  if (catalog.has(PDFName.of('OCProperties'))) {
-    catalog.delete(PDFName.of('OCProperties'));
-  }
-  
   return await pdfDoc.save();
 }
 
@@ -558,6 +552,8 @@ export async function fixBlankPage(arrayBuffer, pageNum) {
   const pdfDoc = await PDFDocument.load(arrayBuffer);
   const pageCount = pdfDoc.getPageCount();
   
+  if (pageCount <= 1) throw new Error('The final page cannot be removed.');
+  if (!Number.isInteger(pageNum) || pageNum < 1 || pageNum > pageCount) throw new Error('Invalid page number.');
   if (pageNum >= 1 && pageNum <= pageCount) {
     pdfDoc.removePage(pageNum - 1);
   }
@@ -575,7 +571,6 @@ export async function fixBlankPage(arrayBuffer, pageNum) {
  * @returns {Promise<Uint8Array>} Corrected PDF bytes
  */
 export async function fixRasterizePages(arrayBuffer, pdfjsDoc, pageNums) {
-  console.log('Running UPDATED fixRasterizePages with pageNums:', pageNums);
   if (!pdfjsDoc) {
     throw new Error('PDF.js document proxy is missing. Cannot rasterize pages.');
   }
@@ -597,7 +592,7 @@ export async function fixRasterizePages(arrayBuffer, pdfjsDoc, pageNums) {
       
       // 300 DPI corresponds to 300/72 = 4.167 scale factor
       const scale = 300 / 72;
-      const viewport = pdfjsPage.getViewport({ scale });
+      const viewport = pdfjsPage.getViewport({ scale, rotation: 0 });
       
       const canvas = document.createElement('canvas');
       canvas.width = Math.round(viewport.width);
@@ -626,17 +621,8 @@ export async function fixRasterizePages(arrayBuffer, pdfjsDoc, pageNums) {
       // 1. Clear page content streams
       page.node.set(PDFName.of('Contents'), pdfDoc.context.obj([]));
       
-      // 2. Clean resources dictionary to remove references to old fonts, spot colors, and layers
-      const resourcesRef = page.node.get(PDFName.of('Resources'));
-      const resources = pdfDoc.context.lookup(resourcesRef);
-      if (resources instanceof PDFDict) {
-        resources.delete(PDFName.of('Font'));
-        resources.delete(PDFName.of('ColorSpace'));
-        resources.delete(PDFName.of('XObject'));
-        resources.delete(PDFName.of('Properties')); // Remove layer/OCG info
-        resources.delete(PDFName.of('ExtGState'));  // Remove transparency/overprint states
-      }
-      
+      page.node.set(PDFName.of('Resources'), pdfDoc.context.obj({}));
+      page.node.delete(PDFName.of('Group'));
       // 3. Draw the image filling the entire cropBox area
       // Calling drawImage AFTER clearing XObject will cause pdf-lib to automatically 
       // re-create the XObject map correctly with the new image.

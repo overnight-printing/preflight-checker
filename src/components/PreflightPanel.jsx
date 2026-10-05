@@ -13,7 +13,8 @@ export default function PreflightPanel({
   onRunFullCheck,
   onFix,
   onReset,
-  artworkType
+  artworkType,
+  bleedAmount = 0
 }) {
 
   if (artworkType !== 'pdf') {
@@ -43,7 +44,7 @@ export default function PreflightPanel({
   if (isScanning) {
     return (
       <div className="sidebar-content" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+        <div role="status" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
           <Loader2 size={32} className="spinner" style={{ animation: 'spin 1s linear infinite', color: 'var(--primary)' }} />
           <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Running full preflight...</span>
         </div>
@@ -110,9 +111,9 @@ export default function PreflightPanel({
     switch(key) {
       case 'bleed': return 'Add Mirror Bleed';
       case 'overprint': return 'Remove Overprint';
-      case 'fontEmbedding': return 'Outline Fonts';
-      case 'spotColors': return 'Convert to CMYK';
-      case 'blankPages': return 'Remove Blank Pages';
+      case 'fontEmbedding': return 'Rasterize at 300 DPI';
+      case 'spotColors': return 'Rasterize to RGB';
+      case 'blankPages': return 'Remove First Blank Page';
       case 'hiddenLayers': return 'Flatten Layers';
       default: return 'Auto Fix';
     }
@@ -155,7 +156,7 @@ export default function PreflightPanel({
         </div>
         <div style={{ width: '1px', background: 'var(--border-color)', height: '24px' }} />
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '600' }}>Error (Fixable)</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '600' }}>Errors</span>
           <span style={{ fontSize: '18px', fontWeight: '700', color: 'var(--danger)', marginTop: '2px' }}>{errorCount}</span>
         </div>
       </div>
@@ -176,7 +177,8 @@ export default function PreflightPanel({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {Object.entries(results.checks).map(([key, check]) => {
             const isFailed = check.status !== 'pass';
-            const isFixable = check.fixable && isFailed;
+            const pendingBleed = key === 'bleed' && isFailed && bleedAmount > 0;
+            const isFixable = check.fixable && isFailed && !pendingBleed;
 
             return (
               <div 
@@ -210,11 +212,14 @@ export default function PreflightPanel({
                       marginTop: '4px',
                       lineHeight: '1.4'
                     }}>
-                      {check.details}
+                      {pendingBleed ? `${(bleedAmount / 72).toFixed(3)}" additional mirror bleed is scheduled for export. The scan describes the source PDF.` : check.details}
                     </p>
                   </div>
                 </div>
 
+                {isFixable && (key === 'fontEmbedding' || key === 'spotColors') && (
+                  <p className="field-help">Rasterizes all pages to RGB at 300 DPI. Text becomes pixels and original color spaces are replaced. Reset Artwork restores the upload.</p>
+                )}
                 {isFixable && (
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
                     <button

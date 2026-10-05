@@ -6,6 +6,7 @@ function PageThumbnail({ pdfDoc, pageNum, isActive, onClick }) {
 
   useEffect(() => {
     let active = true;
+    let renderTask;
     const renderThumb = async () => {
       try {
         const page = await pdfDoc.getPage(pageNum);
@@ -22,8 +23,10 @@ function PageThumbnail({ pdfDoc, pageNum, isActive, onClick }) {
           canvasContext: context,
           viewport: viewport
         };
-        await page.render(renderContext).promise;
+        renderTask = page.render(renderContext);
+        await renderTask.promise;
       } catch (error) {
+        if (error.name === 'RenderingCancelledException') return;
         console.error(`Error rendering thumbnail for page ${pageNum}:`, error);
       }
     };
@@ -31,18 +34,21 @@ function PageThumbnail({ pdfDoc, pageNum, isActive, onClick }) {
     renderThumb();
     return () => {
       active = false;
+      renderTask?.cancel();
     };
   }, [pdfDoc, pageNum]);
 
   return (
-    <div 
+    <button
+      type="button"
+      aria-current={isActive ? 'page' : undefined}
       className={`page-thumbnail-item ${isActive ? 'active' : ''}`}
       onClick={onClick}
       title={`Go to page ${pageNum}`}
     >
       <canvas ref={canvasRef} />
       <span className="thumb-page-num">Page {pageNum}</span>
-    </div>
+    </button>
   );
 }
 
@@ -62,13 +68,15 @@ export default function PageSelector({
       <button
         className={`toggle-previews-btn ${isExpanded ? 'active' : ''}`}
         onClick={onToggleExpand}
+        aria-label={isExpanded ? "Hide page previews" : "Show page previews"}
+        aria-expanded={isExpanded}
         title={isExpanded ? "Hide Page Previews" : "Show Page Previews"}
       >
         {isExpanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
       </button>
 
       {/* Collapsible Thumbnail Strip Wrapper */}
-      {pdfDoc && (
+      {pdfDoc && isExpanded && (
         <div className={`thumbnail-strip-wrapper ${isExpanded ? 'expanded' : ''}`}>
           <div className="thumbnail-strip">
             {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
@@ -88,18 +96,20 @@ export default function PageSelector({
       <div className="page-selector-bar">
         <button
           className="btn btn-secondary btn-icon-only"
+          aria-label="Previous page"
           onClick={() => onPageChange(currentPage - 1)}
           disabled={currentPage <= 1}
         >
           <ChevronLeft size={16} />
         </button>
 
-        <span className="page-indicator">
+        <span className="page-indicator" role="status">
           Page <span>{currentPage}</span> of <span>{totalPages}</span>
         </span>
 
         <button
           className="btn btn-secondary btn-icon-only"
+          aria-label="Next page"
           onClick={() => onPageChange(currentPage + 1)}
           disabled={currentPage >= totalPages}
         >
