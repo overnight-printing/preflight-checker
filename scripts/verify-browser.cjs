@@ -171,6 +171,23 @@ fs.mkdirSync(out, { recursive: true });
   const simpleStamp = await PDFDocument.create();
   simpleStamp.addPage([50, 20]).drawRectangle({ width: 50, height: 20, color: rgb(0, 0, 0) });
   fs.writeFileSync(out + "/simple-stamp.pdf", await simpleStamp.save());
+  // Opaque background behind an alpha mask, like the reported menu PDF.
+  const maskedEdge = await PDFDocument.create();
+  const maskedPage = maskedEdge.addPage([252, 144]);
+  const alpha = maskedEdge.context.register(maskedEdge.context.flateStream('0 g 0 0 252 144 re f', {
+    Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 252, 144],
+    Group: { S: 'Transparency' }, Resources: {},
+  }));
+  const artwork = maskedEdge.context.register(maskedEdge.context.flateStream('0.035294 0.749020 0.780392 rg 0 0 252 144 re f', {
+    Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 252, 144],
+    Group: { S: 'Transparency' }, Resources: {},
+  }));
+  const maskedKey = maskedPage.node.newXObject('Artwork', artwork);
+  const maskState = maskedPage.node.newExtGState('AlphaMask', maskedEdge.context.register(maskedEdge.context.obj({
+    Type: 'ExtGState', SMask: { Type: 'Mask', S: 'Alpha', G: alpha },
+  })));
+  maskedPage.pushOperators(PDFOperator.of('q'), setGraphicsState(maskState), PDFOperator.of('Do', [maskedKey]), PDFOperator.of('Q'));
+  fs.writeFileSync(out + '/masked-edge.pdf', await maskedEdge.save());
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 },
@@ -195,6 +212,7 @@ fs.mkdirSync(out, { recursive: true });
       "layers",
       "inherited-state",
       "simple-stamp",
+      "masked-edge",
     ].map((name) => [
       name,
       Array.from(fs.readFileSync(out + "/" + name + ".pdf")),
@@ -214,6 +232,7 @@ fs.mkdirSync(out, { recursive: true });
       );
       const outputs = {};
       const checks = {};
+      const seamPixels = [];
 
       for (const [name, bytes] of Object.entries(files)) {
         if (name === "inherited-state" || name === "simple-stamp") continue;
@@ -333,6 +352,20 @@ fs.mkdirSync(out, { recursive: true });
         0,
         false,
       );
+      const edgeDoc = await processor.loadPDF(new File([new Uint8Array(outputs['masked-edge-bleed'])], 'edges.pdf'));
+      for (const scale of [1, 1.5, 2, 4]) {
+        const edgePage = await edgeDoc.getPage(1);
+        const viewport = edgePage.getViewport({ scale });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
+        const context = canvas.getContext('2d');
+        await edgePage.render({ canvasContext: context, viewport }).promise;
+        for (const [x, y] of [[90, 9], [90, 153], [9, 81], [261, 81], [9, 9], [261, 9], [9, 153], [261, 153]]) {
+          // Both sides of fractional boundaries must stay the source color.
+          for (const offset of [-1, 0, 1]) seamPixels.push([...context.getImageData(Math.floor(x * scale) + offset, Math.floor(y * scale) + offset, 1, 1).data]);
+        }
+      }
+      await edgeDoc.destroy();
       const bitmap = await createImageBitmap(await (await fetch(image)).blob());
       return {
         outputs,
@@ -341,6 +374,7 @@ fs.mkdirSync(out, { recursive: true });
         stampVisibility,
         lastPageGuard,
         imageSize: [bitmap.width, bitmap.height],
+        seamPixels,
       };
     }, files);
     for (const [name, bytes] of Object.entries(results.outputs))
@@ -363,6 +397,7 @@ fs.mkdirSync(out, { recursive: true });
     assert.equal(results.checks.layers.checks.hiddenLayers.fixable, false);
     assert.deepEqual(results.imageSize, [252, 144]);
     assert.deepEqual(results.stampVisibility, [[255, 255, 255, 255], [255, 255, 255, 255]]);
+    assert.ok(results.seamPixels.every(pixel => pixel.slice(0, 3).every((value, index) => Math.abs(value - [9, 191, 199][index]) <= 12)), 'Mirror bleed has a white or dark seam at a masked artwork edge');
     for (const name of ["stamp-knockout-0", "stamp-knockout-9"]) {
       const stamped = await PDFDocument.load(new Uint8Array(results.outputs[name]));
       const states = stamped.getPage(0).node.Resources().lookup(PDFName.of("ExtGState"));

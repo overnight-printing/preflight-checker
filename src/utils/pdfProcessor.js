@@ -221,7 +221,9 @@ function drawKnockoutStamp(page, stamp, placement) {
 
 function drawVectorPDFPageWithMirrorBleed(page, embeddedPage, baseBox, bleedPt) {
   const xObjectKey = page.node.newXObject('MirrorBleedPage', embeddedPage.ref);
-  const overlap = 0.1;
+  // Cover the fractional-pixel mask/clip edges before drawing the center last.
+  // 0.1 pt left white seams at 150% rendering with full-page alpha masks.
+  const overlap = 0.5;
   const drawSource = (clipRect, matrix) => drawClippedPageXObject(page, xObjectKey, {
     x: clipRect.x - overlap, y: clipRect.y - overlap,
     width: clipRect.width + 2 * overlap, height: clipRect.height + 2 * overlap

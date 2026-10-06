@@ -40,7 +40,7 @@ Reviewed and updated on 2026-10-06. This covers the React interface, upload life
 | Startup | PDF engines loaded with the upload screen. They now load on demand; initial JavaScript fell from about 1.11 MB / 385 KB gzip to about 269 KB / 84 KB gzip. |
 | Memory | Every visited full page and every stamp tint could remain in memory. Preview caches are bounded; thumbnails render only while expanded, cancel unfinished work, and replaced PDF workers are destroyed. |
 | Compression | Tinted stamp streams became uncompressed. They now remain compressed; unchanged exports without a stamp return original bytes. |
-| Bleed rendering | Fractional antialias seams appeared between the original artwork and mirrored PDF edges. Reflections overlap by 0.1 point while reusing source resources. |
+| Bleed rendering | Fractional mask/clip antialias seams appeared between original artwork and mirrored PDF edges. Reflections now overlap by 0.5 point while reusing source resources; the center artwork is drawn last. |
 | Small screens | At 375 px, a 310 px sidebar left a 65 px artwork pane. Preview and controls now stack, with full-width artwork and reachable export actions. |
 | Short windows | Export controls could crowd the editable panel out of view. The tool panel has its own scroll area; mobile uses normal page scrolling. |
 | Keyboard access | Upload zones and thumbnails were clickable containers; the canvas required dragging. They now use keyboard controls, with arrow-key stamp movement and resize, visible focus, named switches, and labeled navigation/zoom buttons. |
@@ -100,6 +100,12 @@ See README **Verification** for runnable commands. These findings describe the r
 The operator reported disappearing objects, gradients, and a white logo, and supplied three real PDFs. Two single-page letter menus contain live transparency and RGB artwork. The two-page 5×10-inch flyer is already PDF 1.3/PDF/X-1a; its white logo is a CCITT-compressed one-bit stencil painted with overprint disabled. Its problem cannot be explained simply as unflattened transparency.
 
 The real-file render exposed a missing-asset bug: PDF.js could not initialize its CCITT/JBIG2 decoder, logged warnings, and omitted the stencil from the browser preview and initial appearance export. Local WASM/JS decoder assets are now bundled under stable filenames and supplied through `wasmUrl`, including image decoders, ICC support, and PostScript shading functions. Decoder errors are no longer silently ignored (`stopAtErrors: true`). Decoder licenses accompany the assets. This fixes the app's missing logo; the external printer/RIP cause still requires a test print.
+
+### Masked artwork bleed seam correction
+
+A subsequent real mirrored-menu export showed white seams at the trim joins when rendered at 150%. The existing 0.1-point overlap did not fully cover fractional clip and alpha-mask edges. At a uniform teal top edge, the faulty render produced RGB 199/240/242 along the join instead of the artwork's 9/191/199. Increasing the reflection/clip overlap to 0.5 point restores the source color there at render scales 1, 1.5, 2, and 4. Page geometry stays unchanged, the source artwork is drawn last, and normal export continues to reuse source PDF vectors, ICC images, and masks.
+
+Added a generated full-page alpha-mask background regression that checks both sides of all four joins and corners at those scales. Browser/UI export, the 50-unit-test suite, lint/build, and Poppler box/image-resource checks passed. The corrected real menu was downloaded through the app; it retains the 629×810 pt page and 9/9→620/801 trim box, and reuses the source ICC image/mask rather than adding RGB strips. Browser and Poppler renders were inspected. The user's exact viewer/RIP was not supplied, so its final print still needs an operator check.
 
 Added an explicit **Flatten visible artwork (RGB)** export, defaulting to 600 DPI with a 300 DPI option. This requested appearance fallback is the exception to the normal resource-preserving PDF invariant. It creates opaque page images before existing crop/bleed operations, then applies vector Union Bugs. It retains boxes/rotation, resets to preserve mode on new uploads, invalidates stale production reports when changed, records mode/resolution in reports, and uses distinct production filenames. No new runtime dependencies were added.
 

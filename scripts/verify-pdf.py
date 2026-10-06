@@ -7,6 +7,7 @@ import subprocess
 
 output = Path(os.environ.get('PREFLIGHT_AUDIT_OUTPUT', 'output/audit')).resolve()
 expected = {
+    'masked-edge-bleed': ((270, 162), (9, 9, 261, 153), 0),
     'stamp-knockout-0': ((252, 144), (0, 0, 252, 144), 0),
     'stamp-knockout-9': ((270, 162), (9, 9, 261, 153), 0),
     'layers-bleed': ((270, 162), (9, 9, 261, 153), 0),
