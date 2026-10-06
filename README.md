@@ -141,9 +141,9 @@ Use **Reset Artwork** at any time to return to the originally uploaded file.
 
 ### 3. Apply corrections carefully
 
-Select an available fix for the issue you want to address. The application creates an updated in-memory PDF and runs the preflight scan again.
+Select an available repair for the issue you want to address. **Remove Overprint**, **Remove First Blank Page**, and **Apply flattening repair (RGB)** create an updated in-memory PDF and rerun the scan. **Add Mirror Bleed** schedules the job's required bleed for export; use **Check production output** to verify it. **Save Production File** downloads the repaired PDF. Your original upload remains available through **Reset Artwork**.
 
-The available issue fixes preserve PDF resources. Missing fonts and unwanted spot inks need correction in the source application. The separate **PDF output → Flatten visible artwork (RGB)** option is an appearance fallback for printer rendering failures, with explicit color and quality tradeoffs. Review [Automatic Fixes and Tradeoffs](#automatic-fixes-and-tradeoffs) before using the output in production.
+Bleed, overprint and blank-page repairs preserve PDF resources. When findings include transparency, gradients, masks or optional layers, **Repair disappearing artwork** offers an explicit 300/600 DPI RGB repair. It bakes the saved visible artwork, updates the preview and removes those live effects from the working PDF. It also converts source vectors/text and press ink plates to pixels, so review its tradeoffs before applying. Missing fonts, low-resolution originals and unwanted spot inks need correction in the source application. The separate **PDF output → Flatten visible artwork (RGB)** option applies the same appearance fallback only when preparing output.
 
 ### 4. Configure the Union Bug
 
@@ -230,11 +230,12 @@ These checks are practical browser-side heuristics, not a replacement for a RIP,
 
 | Fix | Implementation | Important tradeoff |
 | --- | --- | --- |
-| Add Mirror Bleed | Creates a 9 pt mirrored extension around the artwork | Mirrored edges may be visible on artwork with text or distinct edge details |
+| Add Mirror Bleed | Schedules a mirrored extension matching the job's bleed requirement, retaining any larger configured extension | Mirrored edges may be visible on artwork with text or distinct edge details; verify production output before saving |
 | Remove Overprint | Disables `OP` and `op` graphics-state flags | Changes intentional overprint behavior as well as accidental overprint |
 | Remove Blank Pages | Deletes pages identified by the blank-page heuristic | Visually sparse or structurally unusual pages should be reviewed before removal |
 | Optional content layers | Normal output retains saved visibility configuration | Explicit compatibility output bakes saved display visibility; print visibility may differ |
 | Flatten visible artwork (RGB) | Renders each source page on white at the selected 300 or 600 DPI, before crop/bleed/vector stamping | Source text, vectors, CMYK and spot plates become RGB pixels; source output profiles are removed; annotations/forms are excluded; PDF.js does not simulate overprint |
+| Apply flattening repair (RGB) | Uses the same flattening engine to replace the working PDF and rerun preflight immediately | Same RGB tradeoffs; reports and filenames retain the repair mode/resolution, and omitted annotations/forms remain a warning after rescanning |
 
 Always inspect the downloaded file in a production PDF viewer before sending it to print.
 
@@ -491,6 +492,6 @@ PLAYWRIGHT_MODULE=/tmp/preflight-browser/node_modules/playwright node scripts/ve
 
 Outputs, screenshots, and Poppler inspection files are saved under `output/audit/` (ignored by Git). Set `PREFLIGHT_BASE_URL` to change the development-server URL or `PREFLIGHT_AUDIT_OUTPUT` to change the output folder. The PDF verification script requires `pdfinfo`, `pdfimages`, and `pdftoppm`. Visually inspect the rendered PDFs after the automated checks.
 
-The compatibility regression checks gradients, nested transparency/soft masks, saved hidden-layer visibility, page boxes/rotation, multiple pages, requested image resolution, opaque RGB resources, vector stamping, production reports, and reset on upload. Its intentional page images are checked separately from the normal export's zero-raster-resource fixtures.
+The compatibility regression checks gradients, nested transparency/soft masks, saved hidden-layer visibility, page boxes/rotation, multiple pages, requested image resolution, opaque RGB resources, vector stamping, production reports, and reset on upload. It also exercises direct preflight flattening, automatic rescanning, restore-original behavior, persistent annotation omission warnings and 5 mm job bleed repair. Its intentional page images are checked separately from the normal export's zero-raster-resource fixtures.
 
 To verify decoder loading under the deployment base path, build with `GITHUB_ACTIONS=true`, start `GITHUB_ACTIONS=true npm run preview`, and set `PREFLIGHT_PRODUCTION_URL` to the preview URL when running `verify-compatibility.cjs`. Its UI checks then use the production build while utility checks still use the development server, and assert that the white CCITT stencil decoder loads successfully from the generated assets.

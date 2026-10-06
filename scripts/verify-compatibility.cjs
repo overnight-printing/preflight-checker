@@ -152,6 +152,61 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
     await browserPage.locator('input[type=file]').first().setInputFiles(out + '/rotated.pdf');
     assert.equal(await browserPage.locator('#pdf-output-mode').inputValue(), 'preserve');
     assert.equal(await browserPage.locator('#compatibility-dpi').count(), 0);
+
+    // Direct preflight repair must change the working PDF, rerun checks and
+    // retain its RGB/omitted-appearance disclosure through scans and exports.
+    const annotated = await PDFDocument.load(fs.readFileSync(out + '/compatibility-source.pdf'));
+    annotated.getPage(0).node.set(PDFName.of('Annots'), annotated.context.obj([
+      annotated.context.register(annotated.context.obj({
+        Type: 'Annot', Subtype: 'Text', Rect: [10, 10, 30, 30], Contents: 'Printable appearance requires source repair',
+      })),
+    ]));
+    fs.writeFileSync(out + '/repair-source.pdf', await annotated.save());
+    await browserPage.locator('input[type=file]').first().setInputFiles(out + '/repair-source.pdf');
+    await browserPage.getByRole('button', { name: 'Analyze PDF', exact: true }).click();
+    await browserPage.getByRole('button', { name: 'Apply flattening repair (RGB)', exact: true }).click();
+    await browserPage.getByText(/Flattening repair applied at 600 DPI in RGB\./).first().waitFor();
+    await browserPage.getByRole('button', { name: 'Re-analyze', exact: true }).click();
+    await browserPage.getByText(/Flattening repair excluded source annotations\/forms/).waitFor();
+    assert.equal(await browserPage.getByRole('button', { name: 'Apply flattening repair (RGB)', exact: true }).count(), 0);
+    assert.equal(await browserPage.locator('#pdf-output-mode').inputValue(), 'preserve');
+    const repairDownload = browserPage.waitForEvent('download');
+    await browserPage.getByRole('button', { name: 'Save Production File', exact: true }).click();
+    const repairedDownload = await repairDownload;
+    assert.match(repairedDownload.suggestedFilename(), /_Compatibility_600dpi\.pdf$/);
+    await repairedDownload.saveAs(out + '/ui-direct-repair.pdf');
+    await browserPage.getByRole('button', { name: 'Check production output', exact: true }).click();
+    await browserPage.getByText(/Checked production output/).waitFor();
+    const repairReportDownload = browserPage.waitForEvent('download');
+    await browserPage.getByRole('button', { name: 'Download preflight report', exact: true }).click();
+    await (await repairReportDownload).saveAs(out + '/ui-direct-repair-report.json');
+    const repairReport = JSON.parse(fs.readFileSync(out + '/ui-direct-repair-report.json', 'utf8'));
+    assert.equal(repairReport.outputMode, 'compatibility');
+    assert.equal(repairReport.artworkRepair.dpi, 600);
+    assert.equal(repairReport.artworkRepair.omittedInteractiveContent, true);
+    for (const check of ['transparency', 'gradients', 'imageMasks', 'hiddenLayers']) assert.equal(repairReport.checks[check].status, 'pass');
+    assert.equal(repairReport.checks.interactiveContent.status, 'warning');
+    await browserPage.screenshot({ path: out + '/ui-direct-repair.png', fullPage: true });
+    await browserPage.getByRole('button', { name: 'Reset Artwork', exact: true }).click();
+    await browserPage.getByRole('button', { name: 'Analyze PDF', exact: true }).click();
+    await browserPage.getByRole('button', { name: 'Apply flattening repair (RGB)', exact: true }).waitFor();
+    assert.equal(await browserPage.getByText(/Flattening repair applied at 600 DPI in RGB\./).count(), 0);
+
+    // Bleed repair follows a 5 mm job instead of silently using the 9 pt default.
+    await browserPage.locator('.print-requirements summary').click();
+    await browserPage.getByLabel('Required bleed on each edge', { exact: true }).selectOption(String(5 * 72 / 25.4));
+    await browserPage.getByRole('button', { name: 'Analyze PDF', exact: true }).click();
+    await browserPage.getByRole('button', { name: 'Add Mirror Bleed', exact: true }).click();
+    await browserPage.getByText(/0\.197" additional mirror bleed is scheduled/).waitFor();
+    await browserPage.getByRole('button', { name: 'Check production output', exact: true }).click();
+    await browserPage.getByText(/Checked production output/).waitFor();
+    const bleedReportDownload = browserPage.waitForEvent('download');
+    await browserPage.getByRole('button', { name: 'Download preflight report', exact: true }).click();
+    await (await bleedReportDownload).saveAs(out + '/ui-job-bleed-report.json');
+    assert.equal(JSON.parse(fs.readFileSync(out + '/ui-job-bleed-report.json', 'utf8')).checks.bleed.status, 'pass');
+    const bleedDownload = browserPage.waitForEvent('download');
+    await browserPage.getByRole('button', { name: 'Save Production File', exact: true }).click();
+    await (await bleedDownload).saveAs(out + '/ui-job-bleed.pdf');
     assert.deepEqual(errors, []);
     if (process.env.PREFLIGHT_PRODUCTION_URL) {
       assert.ok(decoderRequests.some(request => request.url.endsWith('/assets/pdfjs/jbig2.wasm') && request.status === 200), JSON.stringify(decoderRequests));
@@ -161,6 +216,7 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
       ['compatibility-source-300dpi', 1050, 600, 300], ['compatibility-source-600dpi', 2100, 1200, 600],
       ['rotated-600dpi', 2100, 1200, 600], ['layers-300dpi', 1050, 600, 300], ['multi-300dpi', 1050, 600, 300],
       ['ui-compatibility', 2100, 1200, 600],
+      ['ui-direct-repair', 2100, 1200, 600],
     ]) {
       const filename = `${out}/${name}.pdf`;
       const info = execFileSync('pdfinfo', ['-box', filename], { encoding: 'utf8' });
@@ -180,6 +236,14 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
       execFileSync('pdftoppm', ['-scale-to', '1100', '-png', filename, `${out}/${name}`]);
     }
     execFileSync('pdftoppm', ['-scale-to', '1100', '-png', out + '/compatibility-source.pdf', out + '/compatibility-source']);
-    console.log('Compatibility checks passed: gradients, nested groups/soft mask, white CCITT stencil, saved layers, rotation, multiple pages, opaque RGB, selected DPI, vector stamp, report and upload reset.');
+    const bleedPdf = await PDFDocument.load(fs.readFileSync(out + '/ui-job-bleed.pdf'));
+    const bleedPage = bleedPdf.getPage(0), required = 5 * 72 / 25.4;
+    assert.ok(Math.abs(bleedPage.getTrimBox().x - required) < 0.001);
+    assert.ok(Math.abs(bleedPage.getWidth() - 252 - required * 2) < 0.001);
+    fs.writeFileSync(out + '/ui-job-bleed-verification.txt',
+      execFileSync('pdfinfo', ['-box', out + '/ui-job-bleed.pdf'], { encoding: 'utf8' }) + '\n' +
+      execFileSync('pdfimages', ['-list', out + '/ui-job-bleed.pdf'], { encoding: 'utf8' }));
+    execFileSync('pdftoppm', ['-scale-to', '1100', '-png', out + '/ui-job-bleed.pdf', out + '/ui-job-bleed']);
+    console.log('Compatibility checks passed: gradients, nested groups/soft mask, white CCITT stencil, saved layers, rotation, multiple pages, opaque RGB, selected DPI, vector stamp, direct repair/rescan/reset, retained annotations warning, job bleed, reports and upload reset.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exit(1); });

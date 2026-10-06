@@ -21,6 +21,8 @@ export default function PreflightPanel({
   onFix,
   onReset,
   artworkType,
+  compatibilityDpi,
+  onCompatibilityDpiChange,
   bleedAmount = 0
 }) {
   const [requirementsOpen, setRequirementsOpen] = useState(false);
@@ -105,7 +107,7 @@ export default function PreflightPanel({
           {requirementsPanel}
           <span className="section-title">Full Preflight</span>
           <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
-            Run this when you need image DPI, fonts, color spaces, spot colors, overprint, hidden layers, and blank page checks.
+            Find print issues and apply available repairs for bleed, overprint, blank pages, and troublesome transparency, gradients or masks. Save Production File downloads the repaired PDF.
           </p>
           <button
             className="btn btn-primary btn-action-block"
@@ -152,7 +154,7 @@ export default function PreflightPanel({
       case 'bleed': return 'Add Mirror Bleed';
       case 'overprint': return 'Remove Overprint';
       case 'blankPages': return 'Remove First Blank Page';
-      default: return 'Auto Fix';
+      default: return 'Apply Repair';
     }
   };
 
@@ -175,7 +177,7 @@ export default function PreflightPanel({
       {requirementsPanel}
       <div className={`print-readiness ${errorCount ? 'has-errors' : ''}`} role="status">
         <strong>{errorCount ? 'Resolve errors before printing' : warningCount ? 'Review before printing' : 'Checks passed; confirm the job ticket'}</strong>
-        <span>{results.scope === 'production' ? 'Checked production output' : 'Checked source PDF'} · {requirements.minDpi} DPI target · {(requirements.bleedPoints / 72).toFixed(3)}" bleed</span>
+        <span>{results.scope === 'production' ? 'Checked production output' : results.artworkRepair ? 'Checked repaired artwork' : 'Checked source PDF'} · {requirements.minDpi} DPI target · {(requirements.bleedPoints / 72).toFixed(3)}" bleed</span>
         <p>Review edge artwork, safe margins, separations, and the press profile. Full PDF/X conformance and RIP output are not certified here.</p>
       </div>
 
@@ -214,6 +216,22 @@ export default function PreflightPanel({
         <button className="btn btn-secondary btn-action-block" onClick={onDownloadReport}>Download preflight report</button>
       </div>
 
+      {results.scope !== 'production' && ['transparency', 'gradients', 'imageMasks', 'hiddenLayers'].some(key => results.checks[key] && results.checks[key].status !== 'pass') && (
+        <div className="print-requirements">
+          <strong>Repair disappearing artwork</strong>
+          <p className="field-help">If the preview looks right but objects, masks or gradients disappear in print, rebuild the working PDF as opaque artwork using the saved visible layers. The preview and preflight checks update after applying the repair.</p>
+          <label className="select-field">Repair resolution
+            <select aria-label="Repair resolution" value={compatibilityDpi} onChange={event => onCompatibilityDpiChange(Number(event.target.value))}>
+              <option value={600}>600 DPI — fine artwork and text</option>
+              <option value={300}>300 DPI — smaller files</option>
+            </select>
+          </label>
+          <p className="field-help">Converts source text, vectors, CMYK and spot plates to RGB pixels on white. Removes source press profiles and excludes annotations/forms. Overprint is not simulated; higher DPI cannot restore missing image detail. Review colors and test a printed page. Reset Artwork restores the original.</p>
+          <button className="btn btn-secondary btn-action-block" onClick={() => onFix('flattenArtwork')}>Apply flattening repair (RGB)</button>
+        </div>
+      )}
+      <p className="field-help">Use the repair buttons for supported issues, then Check production output and Save Production File. Missing fonts, low-resolution originals and press color conversion require source artwork or a prepress editor.</p>
+
       {/* 3. Checks Checklist */}
       <div className="sidebar-section" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
@@ -230,7 +248,7 @@ export default function PreflightPanel({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {Object.entries(results.checks).map(([key, check]) => {
             const isFailed = check.status !== 'pass';
-            const pendingBleed = results.scope !== 'production' && key === 'bleed' && isFailed && bleedAmount > 0;
+            const pendingBleed = results.scope !== 'production' && key === 'bleed' && isFailed && bleedAmount > 0 && bleedAmount >= requirements.bleedPoints - 0.01;
             const isFixable = results.scope !== 'production' && check.fixable && isFailed && !pendingBleed;
 
             return (

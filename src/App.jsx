@@ -67,6 +67,20 @@ const downloadFile = (data, filename) => {
   }
 };
 
+const withArtworkRepair = (results, repair) => {
+  if (!repair) return results;
+  return {
+    ...results, artworkRepair: repair,
+    checks: {
+      ...results.checks,
+      ...(repair.omittedInteractiveContent ? { interactiveContent: {
+        status: 'warning', value: true,
+        details: 'Flattening repair excluded source annotations/forms. Reset Artwork and flatten intended printable appearances in a PDF editor before repairing this file.'
+      } } : {})
+    }
+  };
+};
+
 export default function App() {
   // File states
   const [artworkFile, setArtworkFile] = useState(null);
@@ -163,6 +177,8 @@ export default function App() {
   const [printRequirements, setPrintRequirements] = useState(DEFAULT_PRINT_REQUIREMENTS);
   const [pdfOutputMode, setPdfOutputMode] = useState('preserve');
   const [compatibilityDpi, setCompatibilityDpi] = useState(600);
+  const [artworkRepair, setArtworkRepair] = useState(null);
+  const outputArtworkDpi = pdfOutputMode === 'compatibility' ? compatibilityDpi : artworkRepair?.dpi;
   
   // Theme state
   const [theme, setTheme] = useState(() => {
@@ -274,7 +290,7 @@ export default function App() {
     bleedEnabled, bleedAmount, trimCropEnabled, manualCropAmount, bugEnabled,
     currentPage, bugPosition, bugSize, pagePositions, pageSizes, pageAlignments,
     currentAlignment, colorMode, selectedColor, multiPageOptions, printRequirements,
-    pdfOutputMode, compatibilityDpi
+    pdfOutputMode, compatibilityDpi, artworkRepair
   });
   const displayedPreflightResults = preflightResults?.scope === 'production' &&
     (preflightResults.exportSettingsKey !== exportSettingsKey || preflightResults.bugFile !== bugFile)
@@ -354,6 +370,7 @@ export default function App() {
     setImageDpi(300);
     setPdfOutputMode('preserve');
     setCompatibilityDpi(600);
+    setArtworkRepair(null);
     setTrimCropEnabled(false);
     setManualCropAmount(0);
     setExtractedColors(['#000000', '#ffffff']);
@@ -481,6 +498,7 @@ export default function App() {
     setIsScanning(false);
     setPreflightResults(null);
     setNotice(null);
+    setArtworkRepair(null);
     setCurrentPage(1);
     setTotalPages(1);
     setArtworkFile(null);
@@ -767,13 +785,13 @@ export default function App() {
     setIsScanning(true);
     try {
       const results = await runPreflightChecks(artworkFile, pdfDoc, printRequirements);
-      if (requestId === scanRequestIdRef.current) setPreflightResults({ ...results, scope: 'source' });
+      if (requestId === scanRequestIdRef.current) setPreflightResults({ ...withArtworkRepair(results, artworkRepair), scope: 'source' });
     } catch (err) {
       if (requestId === scanRequestIdRef.current) setNotice({ type: 'error', message: `Preflight failed. ${err.message}` });
     } finally {
       if (requestId === scanRequestIdRef.current) setIsScanning(false);
     }
-  }, [artworkFile, pdfDoc, artworkType, printRequirements]);
+  }, [artworkFile, pdfDoc, artworkType, printRequirements, artworkRepair]);
 
   // Handler for Preflight Auto-Fixes
   const handlePreflightFix = async (checkKey) => {
@@ -781,29 +799,32 @@ export default function App() {
     const requestId = artworkLoadRequestIdRef.current;
     setIsLoading(true);
     try {
-      const arrayBuffer = await artworkFile.arrayBuffer();
       let updatedBytes = null;
+      let repair = artworkRepair;
+      let pageToRemove;
 
       if (checkKey === 'bleed') {
-        // Fix Bleed: Enable mirror bleed in settings
-        setBleedEnabledPreservingBug(true);
-        setIsLoading(false);
+        // Add the job's requested bleed without moving a custom stamp on trim.
+        const amount = Math.max(effectiveBleedAmount, printRequirements.bleedPoints);
+        translateBugForBleedChange(effectiveBleedAmount, amount);
+        setBleedAmount(amount);
+        setBleedEnabled(true);
+        setNotice({ type: 'success', message: `Mirror bleed set to ${(amount / 72).toFixed(3)}" on each edge. Check production output, then Save Production File to download the repaired PDF.` });
         return;
+      } else if (checkKey === 'flattenArtwork') {
+        updatedBytes = await createCompatibilityArtworkPdf(artworkFile, pdfDoc, compatibilityDpi);
+        repair = {
+          type: 'flattenVisibleArtwork', dpi: compatibilityDpi, colorSpace: 'RGB',
+          omittedInteractiveContent: Boolean(artworkRepair?.omittedInteractiveContent || pdfBoxInfo?.hasSourceAnnotations || pdfBoxInfo?.hasSourceForms)
+        };
       } else if (checkKey === 'overprint') {
-        updatedBytes = await fixOverprint(arrayBuffer);
+        updatedBytes = await fixOverprint(await artworkFile.arrayBuffer());
 
       } else if (checkKey === 'blankPages') {
         const blankPages = preflightResults?.checks?.blankPages?.value || [];
         if (blankPages.length === 0) return;
-        const pageToRemove = blankPages[0];
-        updatedBytes = await fixBlankPage(arrayBuffer, pageToRemove);
-        setPagePositions({});
-        setPageSizes({});
-        setPageAlignments({});
-        setHasDoneInitialAlignment(false);
-        if (currentPage >= pageToRemove && currentPage > 1) {
-          setCurrentPage(prev => prev - 1);
-        }
+        pageToRemove = blankPages[0];
+        updatedBytes = await fixBlankPage(await artworkFile.arrayBuffer(), pageToRemove);
       }
 
       if (updatedBytes) {
@@ -813,6 +834,17 @@ export default function App() {
         // Re-load corrected PDF
         const doc = await loadPDF(correctedFile);
         if (requestId !== artworkLoadRequestIdRef.current) { await doc.destroy(); return; }
+        if (pageToRemove) {
+          setPagePositions({});
+          setPageSizes({});
+          setPageAlignments({});
+          setHasDoneInitialAlignment(false);
+          if (currentPage >= pageToRemove && currentPage > 1) setCurrentPage(prev => prev - 1);
+        }
+        if (checkKey === 'flattenArtwork') {
+          setArtworkRepair(repair);
+          setPdfOutputMode('preserve'); // The working artwork is already flattened.
+        }
         renderRequestIdRef.current += 1;
         pdfPageCanvasCacheRef.current.clear();
         setPdfBoxInfo(null);
@@ -821,14 +853,18 @@ export default function App() {
         setArtworkFile(correctedFile);
         setPdfDoc(doc);
         setTotalPages(doc.numPages);
+        setNotice({ type: 'success', message: checkKey === 'flattenArtwork'
+          ? `Flattening repair applied at ${compatibilityDpi} DPI in RGB. Review the updated preview, then Save Production File. Reset Artwork restores the original.`
+          : 'Repair applied. Review the updated checks, then Save Production File. Reset Artwork restores the original.' });
 
         // Re-run preflight scan to update the UI status
         setIsScanning(true);
         try {
           const results = await runPreflightChecks(correctedFile, doc, printRequirements);
-          if (requestId === artworkLoadRequestIdRef.current) setPreflightResults({ ...results, scope: 'source' });
+          if (requestId === artworkLoadRequestIdRef.current) setPreflightResults({ ...withArtworkRepair(results, repair), scope: 'source' });
         } catch (scanErr) {
           console.error('Error re-scanning after fix:', scanErr);
+          if (requestId === artworkLoadRequestIdRef.current) setNotice({ type: 'error', message: `Repair applied, but preflight could not verify it. ${scanErr.message}` });
         } finally {
           if (requestId === artworkLoadRequestIdRef.current) setIsScanning(false);
         }
@@ -1085,9 +1121,9 @@ export default function App() {
         };
       }
       if (requestId === scanRequestIdRef.current) setPreflightResults({
-        ...results, scope: 'production', exportSettingsKey, bugFile,
-        outputMode: pdfOutputMode,
-        compatibilityDpi: pdfOutputMode === 'compatibility' ? compatibilityDpi : null
+        ...withArtworkRepair(results, artworkRepair), scope: 'production', exportSettingsKey, bugFile,
+        outputMode: outputArtworkDpi ? 'compatibility' : 'preserve',
+        compatibilityDpi: outputArtworkDpi || null
       });
     } catch (error) {
       if (requestId === scanRequestIdRef.current) setNotice({ type: 'error', message: `Production check failed. ${error.message}` });
@@ -1115,7 +1151,7 @@ export default function App() {
 
     try {
       const safeFilename = artworkFile.name.replace(/\.[^/.]+$/, "") + (bugEnabled ? '_Proof' : '_Fixed') +
-        (artworkType === 'pdf' && pdfOutputMode === 'compatibility' ? `_Compatibility_${compatibilityDpi}dpi` : '');
+        (artworkType === 'pdf' && outputArtworkDpi ? `_Compatibility_${outputArtworkDpi}dpi` : '');
 
       if (artworkType === 'pdf') {
         const outputBytes = await createPreparedPdfBytes();
@@ -1413,7 +1449,7 @@ export default function App() {
                   <label className="select-field" htmlFor="pdf-output-mode">
                     <span>PDF output</span>
                     <select id="pdf-output-mode" value={pdfOutputMode} onChange={event => setPdfOutputMode(event.target.value)}>
-                      <option value="preserve">Preserve vectors and source colors</option>
+                      <option value="preserve">{artworkRepair ? 'Keep repaired RGB artwork' : 'Preserve vectors and source colors'}</option>
                       <option value="compatibility">Flatten visible artwork (RGB)</option>
                     </select>
                   </label>
@@ -1428,6 +1464,7 @@ export default function App() {
                     <p className="field-help">For objects or gradients that disappear when printed. Bakes the visible artwork into an opaque RGB image on white; the Union Bug stays vector.</p>
                     <p className="field-help">Source text/vectors, CMYK and spot plates become RGB pixels. Source output profiles are removed. Annotations/forms are excluded; overprint is not simulated. Confirm the preview and printer color settings, then test one page. Use a desktop transparency flattener when press colors or vector text must be retained.</p>
                   </>}
+                  {artworkRepair && <p className="field-help">Flattening repair applied at {artworkRepair.dpi} DPI in RGB. Source vectors, text and ink plates were converted to pixels. Reset Artwork restores the original PDF.</p>}
                 </div>
               )}
               {activeSidebarTab === 'stamper' ? (
@@ -1482,6 +1519,8 @@ export default function App() {
                   results={displayedPreflightResults}
                   isScanning={isScanning}
                   bleedAmount={effectiveBleedAmount}
+                  compatibilityDpi={compatibilityDpi}
+                  onCompatibilityDpiChange={setCompatibilityDpi}
                   onRunFullCheck={handleRunFullPreflight}
                   onCheckProduction={handleCheckProduction}
                   canCheckProduction={Boolean(canExport)}
@@ -1504,7 +1543,7 @@ export default function App() {
                 <div className="proof-export-section">
                   <div className="export-heading">
                     <strong>Customer proof</strong>
-                    <span>{pdfOutputMode === 'compatibility' && artworkType === 'pdf' ? `Visible artwork flattened at ${compatibilityDpi} DPI in RGB.` : 'Losslessly optimized while preserving original PDF colors.'}</span>
+                    <span>{outputArtworkDpi && artworkType === 'pdf' ? `Visible artwork flattened at ${outputArtworkDpi} DPI in RGB.` : 'Losslessly optimized while preserving original PDF colors.'}</span>
                   </div>
                   <label className="proof-id-field" htmlFor="proof-id">
                     <span>Estimate or invoice number</span>
@@ -1537,7 +1576,7 @@ export default function App() {
                 </div>
                 <div className="export-heading">
                   <strong>Production file</strong>
-                  <span>{pdfOutputMode === 'compatibility' && artworkType === 'pdf' ? `Compatibility PDF · ${compatibilityDpi} DPI RGB artwork.` : 'Save the current output as a production file.'}</span>
+                  <span>{outputArtworkDpi && artworkType === 'pdf' ? `Compatibility PDF · ${outputArtworkDpi} DPI RGB artwork.` : 'Save the current output as a production file.'}</span>
                 </div>
                 <button
                   className={`btn btn-action-block ${
