@@ -47,6 +47,8 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
       colorMode: { status: 'pass', details: 'Process colors (CMYK/Grayscale) only', value: null },
       pageSize: { status: 'pass', details: 'Page sizes are consistent', value: null },
       transparency: { status: 'pass', details: 'No unflattened transparency detected', value: null },
+      gradients: { status: 'pass', details: 'No PDF gradient shadings detected', value: [] },
+      imageMasks: { status: 'pass', details: 'No stencil or explicit image masks detected', value: null },
       spotColors: { status: 'pass', details: 'No spot colors detected', value: [], fixable: false },
       blankPages: { status: 'pass', details: 'No blank pages detected', value: [], fixable: true },
       hiddenLayers: { status: 'pass', details: 'No optional content layers detected', value: null },
@@ -68,6 +70,9 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
   let mismatchPageNum = -1;
   let mismatchSizeStr = '';
   let hasTransparency = false;
+  const shadingTypes = [];
+  let stencilImages = 0;
+  let explicitImageMasks = 0;
   const spotColorsFound = new Set();
   const blankPagesList = [];
 
@@ -96,6 +101,17 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
   for (const dict of collectPdfDictionaries(pdfDoc)) {
 
     const type = dict.get(PDFName.of('Type'));
+    if (lookup(dict.get(PDFName.of('Subtype'))) === PDFName.of('Image')) {
+      if (lookup(dict.get(PDFName.of('ImageMask'))) === PDFBool.True) stencilImages++;
+      if (dict.has(PDFName.of('Mask'))) explicitImageMasks++;
+    }
+    // Forms can contain transparency groups even when all opacity values are 1.
+    if (lookup(dict.get(PDFName.of('S'))) === PDFName.of('Transparency')) hasTransparency = true;
+    const shadingType = lookup(dict.get(PDFName.of('ShadingType')));
+    if (shadingType instanceof PDFNumber) {
+      shadingTypes.push(shadingType.asNumber());
+      if (isRgbColorSpace(lookup(dict.get(PDFName.of('ColorSpace'))), lookup)) hasRGBContent = true;
+    }
 
     // Check Overprint
     if (type === PDFName.of('ExtGState') || ['OP', 'op', 'ca', 'CA', 'BM', 'SMask'].some(key => dict.has(PDFName.of(key)))) {
@@ -106,9 +122,9 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
       }
 
       // Check Transparency via ExtGState opacity
-      const ca = dict.get(PDFName.of('ca'));
-      const CA = dict.get(PDFName.of('CA'));
-      const BM = dict.get(PDFName.of('BM'));
+      const ca = lookup(dict.get(PDFName.of('ca')));
+      const CA = lookup(dict.get(PDFName.of('CA')));
+      const BM = lookup(dict.get(PDFName.of('BM')));
       if (
         (ca instanceof PDFNumber && ca.value < 1.0) ||
         (CA instanceof PDFNumber && CA.value < 1.0) ||
@@ -388,8 +404,22 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
     results.checks.transparency = {
       status: requirements.workflow === 'legacy' ? 'error' : 'info',
       details: requirements.workflow === 'legacy' ? 'Live transparency detected. PDF/X-1a requires flattening in a color-managed prepress application.'
-        : 'Live transparency detected and retained. PDF/X-4 supports transparency; confirm the printer uses a compatible RIP.',
+        : 'Live transparency detected and retained. PDF/X-4 supports transparency; confirm a compatible RIP. If objects disappear in print, test Flatten visible artwork or use a desktop transparency flattener.',
       value: true
+    };
+  }
+
+  if (shadingTypes.length) {
+    results.checks.gradients = {
+      status: requirements.workflow === 'legacy' ? 'warning' : 'info',
+      value: shadingTypes,
+      details: `${shadingTypes.length} PDF gradient shading(s) detected. These are valid print artwork, but some drivers/RIPs render them incorrectly. If gradients disappear, test Flatten visible artwork; use a color-managed desktop flattener when vectors or press colors must be retained.`
+    };
+  }
+  if (stencilImages || explicitImageMasks) {
+    results.checks.imageMasks = {
+      status: 'info', value: { stencils: stencilImages, explicitMasks: explicitImageMasks },
+      details: `${stencilImages} stencil image(s), ${explicitImageMasks} explicit image mask(s). These can be opaque artwork, including white logos, and are not necessarily live transparency. If artwork disappears in print, test Flatten visible artwork to bake masks into the page image.`
     };
   }
 

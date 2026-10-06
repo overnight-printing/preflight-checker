@@ -2298,6 +2298,8 @@ fieldset:disabled { opacity: 0.65; }
 .print-requirements summary { cursor: pointer; font-size: 13px; font-weight: 600; }
 .print-requirements .select-field { margin-top: 12px; display: grid; gap: 6px; font-size: 12px; }
 .print-requirements .field-help { margin-top: 10px; }
+.pdf-output-settings { margin: 12px; }
+.pdf-output-settings .select-field:first-child { margin-top: 0; }
 .print-readiness { display: grid; gap: 8px; padding: 12px; border-left: 3px solid var(--warning); background: var(--bg-card); font-size: 12px; }
 .print-readiness.has-errors { border-left-color: var(--danger); }
 .print-readiness span, .print-readiness p { color: var(--text-secondary); line-height: 1.5; }

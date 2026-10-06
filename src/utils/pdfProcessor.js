@@ -24,6 +24,13 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 // Ship the matching worker with the app, including deployments under a base path.
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
+// PDF.js 5.7 needs local decoder assets for CCITT/JBIG2 stencils, JPEG 2000,
+// ICC colors and PostScript gradient functions. Missing assets can omit art.
+const pdfWasmAssets = import.meta.glob(['../../node_modules/pdfjs-dist/wasm/*.{wasm,js}', '../../node_modules/pdfjs-dist/wasm/LICENSE*'], {
+  eager: true, query: '?url', import: 'default'
+});
+const pdfWasmUrl = new URL('./', new URL(pdfWasmAssets['../../node_modules/pdfjs-dist/wasm/jbig2.wasm'], import.meta.url)).href;
+
 /**
  * Loads a PDF file and returns the pdfjs document object.
  *
@@ -32,7 +39,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
  */
 export async function loadPDF(file) {
   const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer, wasmUrl: pdfWasmUrl, stopAtErrors: true });
   return await loadingTask.promise;
 }
 

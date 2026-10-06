@@ -18,6 +18,7 @@ const fixOverprint = async (...args) => (await import('./utils/preflightChecker'
 const fixBlankPage = async (...args) => (await import('./utils/preflightChecker')).fixBlankPage(...args);
 const createCustomerProofPdf = async (...args) => (await import('./utils/customerProof')).createCustomerProofPdf(...args);
 const createPngProofSourcePdf = async (...args) => (await import('./utils/customerProof')).createPngProofSourcePdf(...args);
+const createCompatibilityArtworkPdf = async (...args) => (await import('./utils/compatibilityPdf')).createCompatibilityArtworkPdf(...args);
 
 import {
   analyzeBackgroundLuminance,
@@ -160,6 +161,8 @@ export default function App() {
   const [activeSidebarTab, setActiveSidebarTab] = useState('preflight'); // 'preflight' is default active tab
   const [preflightResults, setPreflightResults] = useState(null);
   const [printRequirements, setPrintRequirements] = useState(DEFAULT_PRINT_REQUIREMENTS);
+  const [pdfOutputMode, setPdfOutputMode] = useState('preserve');
+  const [compatibilityDpi, setCompatibilityDpi] = useState(600);
   
   // Theme state
   const [theme, setTheme] = useState(() => {
@@ -270,7 +273,8 @@ export default function App() {
   const exportSettingsKey = JSON.stringify({
     bleedEnabled, bleedAmount, trimCropEnabled, manualCropAmount, bugEnabled,
     currentPage, bugPosition, bugSize, pagePositions, pageSizes, pageAlignments,
-    currentAlignment, colorMode, selectedColor, multiPageOptions, printRequirements
+    currentAlignment, colorMode, selectedColor, multiPageOptions, printRequirements,
+    pdfOutputMode, compatibilityDpi
   });
   const displayedPreflightResults = preflightResults?.scope === 'production' &&
     (preflightResults.exportSettingsKey !== exportSettingsKey || preflightResults.bugFile !== bugFile)
@@ -348,6 +352,8 @@ export default function App() {
     setBleedEnabled(false);
     setBleedAmount(9);
     setImageDpi(300);
+    setPdfOutputMode('preserve');
+    setCompatibilityDpi(600);
     setTrimCropEnabled(false);
     setManualCropAmount(0);
     setExtractedColors(['#000000', '#ffffff']);
@@ -1037,8 +1043,11 @@ export default function App() {
       exportColors[pageNum] = colorMode === 'auto' ? (analysis.isDark ? '#ffffff' : '#000000') : selectedColor;
     }
 
+    const exportArtwork = pdfOutputMode === 'compatibility'
+      ? new File([await createCompatibilityArtworkPdf(artworkFile, pdfDoc, compatibilityDpi)], artworkFile.name, { type: 'application/pdf' })
+      : artworkFile;
     return stitchBugToPDF(
-      artworkFile,
+      exportArtwork,
       bugFile,
       exportColors,
       bugPosition,
@@ -1068,7 +1077,7 @@ export default function App() {
       const file = new File([bytes], artworkFile.name, { type: 'application/pdf' });
       document = await loadPDF(file);
       const results = await runPreflightChecks(file, document, printRequirements);
-      if ((effectiveBleedAmount > 0 || trimCropEnabled || manualCropAmount > 0) &&
+      if ((effectiveBleedAmount > 0 || trimCropEnabled || manualCropAmount > 0 || pdfOutputMode === 'compatibility') &&
           (pdfBoxInfo?.hasSourceAnnotations || pdfBoxInfo?.hasSourceForms)) {
         results.checks.interactiveContent = {
           status: 'warning', value: true,
@@ -1076,7 +1085,9 @@ export default function App() {
         };
       }
       if (requestId === scanRequestIdRef.current) setPreflightResults({
-        ...results, scope: 'production', exportSettingsKey, bugFile
+        ...results, scope: 'production', exportSettingsKey, bugFile,
+        outputMode: pdfOutputMode,
+        compatibilityDpi: pdfOutputMode === 'compatibility' ? compatibilityDpi : null
       });
     } catch (error) {
       if (requestId === scanRequestIdRef.current) setNotice({ type: 'error', message: `Production check failed. ${error.message}` });
@@ -1103,7 +1114,8 @@ export default function App() {
     setIsExporting(true);
 
     try {
-      const safeFilename = artworkFile.name.replace(/\.[^/.]+$/, "") + (bugEnabled ? '_Proof' : '_Fixed');
+      const safeFilename = artworkFile.name.replace(/\.[^/.]+$/, "") + (bugEnabled ? '_Proof' : '_Fixed') +
+        (artworkType === 'pdf' && pdfOutputMode === 'compatibility' ? `_Compatibility_${compatibilityDpi}dpi` : '');
 
       if (artworkType === 'pdf') {
         const outputBytes = await createPreparedPdfBytes();
@@ -1396,6 +1408,28 @@ export default function App() {
               </div>
 
               <fieldset className="tool-controls" disabled={isBusy || isScanning}>
+              {artworkType === 'pdf' && (
+                <div className="pdf-output-settings print-requirements">
+                  <label className="select-field" htmlFor="pdf-output-mode">
+                    <span>PDF output</span>
+                    <select id="pdf-output-mode" value={pdfOutputMode} onChange={event => setPdfOutputMode(event.target.value)}>
+                      <option value="preserve">Preserve vectors and source colors</option>
+                      <option value="compatibility">Flatten visible artwork (RGB)</option>
+                    </select>
+                  </label>
+                  {pdfOutputMode === 'compatibility' && <>
+                    <label className="select-field" htmlFor="compatibility-dpi">
+                      <span>Artwork resolution</span>
+                      <select id="compatibility-dpi" value={compatibilityDpi} onChange={event => setCompatibilityDpi(Number(event.target.value))}>
+                        <option value={600}>600 DPI — fine artwork and text</option>
+                        <option value={300}>300 DPI — smaller files</option>
+                      </select>
+                    </label>
+                    <p className="field-help">For objects or gradients that disappear when printed. Bakes the visible artwork into an opaque RGB image on white; the Union Bug stays vector.</p>
+                    <p className="field-help">Source text/vectors, CMYK and spot plates become RGB pixels. Source output profiles are removed. Annotations/forms are excluded; overprint is not simulated. Confirm the preview and printer color settings, then test one page. Use a desktop transparency flattener when press colors or vector text must be retained.</p>
+                  </>}
+                </div>
+              )}
               {activeSidebarTab === 'stamper' ? (
                 <ControlPanel
                   colorMode={colorMode}
@@ -1465,12 +1499,12 @@ export default function App() {
               <div className="export-area">
                 {exportError && <p className="field-error" role="alert">{exportError}</p>}
                 {(pdfBoxInfo?.hasSourceAnnotations || pdfBoxInfo?.hasSourceForms) && (
-                  <p className="field-help">Source annotations/forms are present. Bleed, crop, and customer-proof exports omit their appearances. Flatten intended printable appearances before those operations.</p>
+                  <p className="field-help">Source annotations/forms are present. Bleed, crop, compatibility, and customer-proof exports omit their appearances. Flatten intended printable appearances before those operations.</p>
                 )}
                 <div className="proof-export-section">
                   <div className="export-heading">
                     <strong>Customer proof</strong>
-                    <span>Losslessly optimized while preserving original PDF colors.</span>
+                    <span>{pdfOutputMode === 'compatibility' && artworkType === 'pdf' ? `Visible artwork flattened at ${compatibilityDpi} DPI in RGB.` : 'Losslessly optimized while preserving original PDF colors.'}</span>
                   </div>
                   <label className="proof-id-field" htmlFor="proof-id">
                     <span>Estimate or invoice number</span>
@@ -1503,7 +1537,7 @@ export default function App() {
                 </div>
                 <div className="export-heading">
                   <strong>Production file</strong>
-                  <span>Save the current output as a production file.</span>
+                  <span>{pdfOutputMode === 'compatibility' && artworkType === 'pdf' ? `Compatibility PDF · ${compatibilityDpi} DPI RGB artwork.` : 'Save the current output as a production file.'}</span>
                 </div>
                 <button
                   className={`btn btn-action-block ${

@@ -30,7 +30,7 @@ Overnight Preflight Tool helps production teams inspect incoming PDF files, appl
 
 ### PDF preflight
 
-- Runs 16 print-oriented checks on source PDFs or prepared production output, with pass, review, error, and information counts.
+- Runs 18 print-oriented checks on source PDFs or prepared production output, with pass, review, error, and information counts.
 - Explains the source-file findings and which corrections are available.
 - Detects common issues involving bleed, image resolution, page size, fonts, colors, transparency, layers, overprint, blank pages, and PDF version.
 - Re-scans the corrected PDF after an automatic fix is applied.
@@ -65,6 +65,7 @@ Overnight Preflight Tool helps production teams inspect incoming PDF files, appl
 - Exports PDF artwork as PDF.
 - Exports PNG/JPG artwork as PNG.
 - Allows preflight/bleed-only processing without applying a Union Bug.
+- Offers an explicit 300/600 DPI compatibility PDF for artwork that disappears on a printer: opaque RGB page images, followed by vector Union Bug stamping.
 
 ## Supported Files
 
@@ -83,7 +84,7 @@ Preflight analysis is available only for PDF artwork. Images can still use the v
 - Node.js 22.13 or newer (Node.js 24 recommended).
 - npm, included with Node.js.
 - A modern browser with Canvas, File API, and Web Worker support.
-- The PDF.js worker is bundled with the app; PDF processing requires no CDN connection once app assets are loaded.
+- The PDF.js worker and its WASM/JS decoder assets are bundled with the app; PDF processing requires no CDN connection once app assets are loaded. Missing decoder assets can hide CCITT/JBIG2 logos, JPEG 2000 images, or gradient artwork, so deployment must include the entire generated assets folder.
 
 ### Install and run
 
@@ -142,7 +143,7 @@ Use **Reset Artwork** at any time to return to the originally uploaded file.
 
 Select an available fix for the issue you want to address. The application creates an updated in-memory PDF and runs the preflight scan again.
 
-The available fixes preserve PDF resources. Missing fonts and unwanted spot inks need correction in the source application; the app does not present RGB rasterization as a print repair. Review [Automatic Fixes and Tradeoffs](#automatic-fixes-and-tradeoffs) before using the output in production.
+The available issue fixes preserve PDF resources. Missing fonts and unwanted spot inks need correction in the source application. The separate **PDF output → Flatten visible artwork (RGB)** option is an appearance fallback for printer rendering failures, with explicit color and quality tradeoffs. Review [Automatic Fixes and Tradeoffs](#automatic-fixes-and-tradeoffs) before using the output in production.
 
 ### 4. Configure the Union Bug
 
@@ -178,7 +179,7 @@ To prepare a review file, enter the estimate or invoice number and click **Creat
 - includes the company logo, approval instructions, and review-copy guidance.
 - preserves original PDF artwork color spaces and applies lossless PDF object-stream compression.
 
-The color-preserving proof does not rasterize or downsample PDF artwork. File-size savings therefore depend on how efficiently the source PDF was already encoded; image-heavy proofs may remain close to the original file size.
+With **Preserve vectors and source colors**, the proof does not rasterize or downsample PDF artwork. File-size savings therefore depend on how efficiently the source PDF was already encoded; image-heavy proofs may remain close to the original file size. Selecting compatibility output also flattens the artwork used in the customer proof.
 
 Customer proofs use a filename such as `campaign-flyer_Customer_Proof_EST-1042.pdf`.
 
@@ -200,6 +201,8 @@ Click **Save Production File** for production artwork.
 | Color Mode | Looks for RGB color spaces in page resources and images | Warns when RGB content is detected |
 | Page Size Match | Compares page dimensions with the first page | Warns when dimensions differ by more than 3 pt |
 | Transparency | Inspects transparency groups, opacity, and blend modes | Informational for general/PDF/X-4 workflows; an error for legacy PDF/X-1a |
+| Gradients & Shadings | Finds PDF shading dictionaries, including nested artwork | Explains printer/RIP rendering risks without treating valid gradients as defects |
+| Image Masks | Finds stencil and explicit image masks | Identifies opaque masked artwork, including white logos; offers compatibility export guidance for printer failures |
 | Spot Colors | Looks for Separation and DeviceN color spaces | Lists intended ink plates; requires color-managed source conversion for unwanted spots |
 | Blank Pages | Checks PDF.js painting operators, including paths and outlined artwork | Offers removal of the first flagged page while retaining at least one page |
 | Hidden Layers | Checks for optional-content configuration in the PDF catalog | Requests visibility review; removing the catalog alone is unsafe |
@@ -230,9 +233,18 @@ These checks are practical browser-side heuristics, not a replacement for a RIP,
 | Add Mirror Bleed | Creates a 9 pt mirrored extension around the artwork | Mirrored edges may be visible on artwork with text or distinct edge details |
 | Remove Overprint | Disables `OP` and `op` graphics-state flags | Changes intentional overprint behavior as well as accidental overprint |
 | Remove Blank Pages | Deletes pages identified by the blank-page heuristic | Visually sparse or structurally unusual pages should be reviewed before removal |
-| Optional content layers | Review in a production PDF editor | No automatic flattening is offered |
+| Optional content layers | Normal output retains saved visibility configuration | Explicit compatibility output bakes saved display visibility; print visibility may differ |
+| Flatten visible artwork (RGB) | Renders each source page on white at the selected 300 or 600 DPI, before crop/bleed/vector stamping | Source text, vectors, CMYK and spot plates become RGB pixels; source output profiles are removed; annotations/forms are excluded; PDF.js does not simulate overprint |
 
 Always inspect the downloaded file in a production PDF viewer before sending it to print.
+
+### Printer compatibility output
+
+Use **PDF output → Flatten visible artwork (RGB)** when objects, masked logos, or gradients look correct in the preview but disappear on a printer. Choose **600 DPI** for fine artwork and text, or **300 DPI** for smaller files, then **Check production output** and **Save Production File**. The filename includes `_Compatibility_600dpi` or `_Compatibility_300dpi`; the production report records the mode and resolution. New uploads return to vector/color-preserving output.
+
+This operation bakes the source artwork into one opaque RGB page image. The original upload stays available, page boxes and rotation are retained, and added Union Bugs remain vector. Existing low-resolution artwork does not gain detail. Browser memory limits are 40 million pixels per page, 120 million pixels per document, and 16,384 pixels per canvas edge; the tool rejects oversized jobs and never silently lowers the selected DPI.
+
+This is not selective transparency flattening, CMYK conversion, PDF/X conversion, or press proofing. Use a color-managed desktop flattener with the printer's output profile when source separations, vector text, or exact press colors must be retained. Check saved layer visibility and source annotations/forms before export, and print a test page.
 
 ## Union Bug Settings
 
@@ -272,7 +284,7 @@ All PDF dimensions use PDF points internally:
 
 When no bleed or manual/visual crop is active, the application can preserve the original PDF pages and add the Union Bug as a vector overlay.
 
-Mirror bleed, TrimBox cropping, and manual insets embed and clip the original PDF resources. They preserve vectors and source color spaces. Production processing does not rasterize PDF artwork.
+In normal output, mirror bleed, TrimBox cropping, and manual insets embed and clip the original PDF resources, preserving vectors and source color spaces. Explicit compatibility output first rasterizes the visible source artwork; the same geometry and vector stamping operations then apply.
 
 ## Multi-Page PDFs
 
@@ -406,7 +418,15 @@ npm run dev
 
 ### The exported PDF looks flattened
 
-Current crop, bleed, stamping, and proof exports retain original PDF resources. Use **Reset Artwork** if an older session or externally modified PDF was rasterized.
+Check **PDF output**. **Preserve vectors and source colors** retains original PDF resources; **Flatten visible artwork (RGB)** deliberately produces page images. Use **Reset Artwork** if an older session or externally modified PDF was rasterized.
+
+### Objects, white logos, or gradients disappear on the printer
+
+- Inspect the source in Acrobat Output Preview with overprint simulation. White objects should normally knock out, not overprint. Do not remove all overprint blindly; black text and intentional ink combinations may depend on it.
+- A white logo may be a stencil/image mask even in an already flattened PDF/X-1a file. Flattening live transparency alone may leave that stencil unchanged.
+- Test one page using Acrobat **Print → Advanced → Print as Image** at 600 DPI. [Adobe's instructions](https://helpx.adobe.com/ca/acrobat/kb/quick-fix-print-pdf-image.html) explain how this bypasses printer PDF interpretation.
+- For a downloadable fallback, select **Flatten visible artwork (RGB)** in this tool. Confirm the visible artwork and printer color settings before printing.
+- For commercial CMYK/spot production, use a desktop transparency flattener and the shop's output profile; retain vectors where possible. [Adobe's flattener documentation](https://helpx.adobe.com/acrobat/using/transparency-flattening-acrobat-pro.html) describes the controls and tradeoffs.
 
 ### The Union Bug color does not change completely
 
@@ -466,6 +486,11 @@ The browser regression script creates its own fixtures and downloads real app ex
 npm install --prefix /tmp/preflight-browser playwright
 PLAYWRIGHT_MODULE=/tmp/preflight-browser/node_modules/playwright node scripts/verify-browser.cjs
 python3 scripts/verify-pdf.py
+PLAYWRIGHT_MODULE=/tmp/preflight-browser/node_modules/playwright node scripts/verify-compatibility.cjs
 ```
 
 Outputs, screenshots, and Poppler inspection files are saved under `output/audit/` (ignored by Git). Set `PREFLIGHT_BASE_URL` to change the development-server URL or `PREFLIGHT_AUDIT_OUTPUT` to change the output folder. The PDF verification script requires `pdfinfo`, `pdfimages`, and `pdftoppm`. Visually inspect the rendered PDFs after the automated checks.
+
+The compatibility regression checks gradients, nested transparency/soft masks, saved hidden-layer visibility, page boxes/rotation, multiple pages, requested image resolution, opaque RGB resources, vector stamping, production reports, and reset on upload. Its intentional page images are checked separately from the normal export's zero-raster-resource fixtures.
+
+To verify decoder loading under the deployment base path, build with `GITHUB_ACTIONS=true`, start `GITHUB_ACTIONS=true npm run preview`, and set `PREFLIGHT_PRODUCTION_URL` to the preview URL when running `verify-compatibility.cjs`. Its UI checks then use the production build while utility checks still use the development server, and assert that the white CCITT stencil decoder loads successfully from the generated assets.

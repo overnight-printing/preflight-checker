@@ -306,6 +306,8 @@ function getCheckTitle(key) {
     case 'colorMode': return 'Color Mode';
     case 'pageSize': return 'Page Size Match';
     case 'transparency': return 'Transparency';
+    case 'gradients': return 'Gradients & Shadings';
+    case 'imageMasks': return 'Image Masks';
     case 'spotColors': return 'Spot Colors';
     case 'blankPages': return 'Blank Pages';
     case 'hiddenLayers': return 'Hidden Layers';
