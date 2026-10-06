@@ -16,7 +16,6 @@ const stitchBugToPDF = async (...args) => (await import('./utils/pdfProcessor'))
 const runPreflightChecks = async (...args) => (await import('./utils/preflightChecker')).runPreflightChecks(...args);
 const fixOverprint = async (...args) => (await import('./utils/preflightChecker')).fixOverprint(...args);
 const fixBlankPage = async (...args) => (await import('./utils/preflightChecker')).fixBlankPage(...args);
-const fixRasterizePages = async (...args) => (await import('./utils/preflightChecker')).fixRasterizePages(...args);
 const createCustomerProofPdf = async (...args) => (await import('./utils/customerProof')).createCustomerProofPdf(...args);
 const createPngProofSourcePdf = async (...args) => (await import('./utils/customerProof')).createPngProofSourcePdf(...args);
 
@@ -34,6 +33,7 @@ import {
 import { getOutputGeometry, rotatedSize } from './utils/pdfGeometry';
 import { validateArtworkFile, MAX_PDF_BYTES } from './utils/fileValidation';
 import { normalizeProofId, proofIdForFilename } from './utils/proofId';
+import { DEFAULT_PRINT_REQUIREMENTS } from './utils/printSettings';
 
 import './App.css';
 
@@ -159,6 +159,7 @@ export default function App() {
   // Preflight states
   const [activeSidebarTab, setActiveSidebarTab] = useState('preflight'); // 'preflight' is default active tab
   const [preflightResults, setPreflightResults] = useState(null);
+  const [printRequirements, setPrintRequirements] = useState(DEFAULT_PRINT_REQUIREMENTS);
   
   // Theme state
   const [theme, setTheme] = useState(() => {
@@ -266,6 +267,14 @@ export default function App() {
   const exportError = geometryError || selectionError || (bugEnabled && (!bugFile || !bugCanvas) ? 'Load a Union Bug PDF before exporting.' : '');
   const isBusy = isLoading || isBugLoading || isExporting || isGeneratingProof;
   const canExport = artworkCanvas && !isBusy && !isScanning && !isBugRendering && !exportError;
+  const exportSettingsKey = JSON.stringify({
+    bleedEnabled, bleedAmount, trimCropEnabled, manualCropAmount, bugEnabled,
+    currentPage, bugPosition, bugSize, pagePositions, pageSizes, pageAlignments,
+    currentAlignment, colorMode, selectedColor, multiPageOptions, printRequirements
+  });
+  const displayedPreflightResults = preflightResults?.scope === 'production' &&
+    (preflightResults.exportSettingsKey !== exportSettingsKey || preflightResults.bugFile !== bugFile)
+    ? null : preflightResults;
 
   const hasArtwork = Boolean(artworkFile);
 
@@ -751,14 +760,14 @@ export default function App() {
     const requestId = ++scanRequestIdRef.current;
     setIsScanning(true);
     try {
-      const results = await runPreflightChecks(artworkFile, pdfDoc);
-      if (requestId === scanRequestIdRef.current) setPreflightResults(results);
+      const results = await runPreflightChecks(artworkFile, pdfDoc, printRequirements);
+      if (requestId === scanRequestIdRef.current) setPreflightResults({ ...results, scope: 'source' });
     } catch (err) {
       if (requestId === scanRequestIdRef.current) setNotice({ type: 'error', message: `Preflight failed. ${err.message}` });
     } finally {
       if (requestId === scanRequestIdRef.current) setIsScanning(false);
     }
-  }, [artworkFile, pdfDoc, artworkType]);
+  }, [artworkFile, pdfDoc, artworkType, printRequirements]);
 
   // Handler for Preflight Auto-Fixes
   const handlePreflightFix = async (checkKey) => {
@@ -789,10 +798,6 @@ export default function App() {
         if (currentPage >= pageToRemove && currentPage > 1) {
           setCurrentPage(prev => prev - 1);
         }
-      } else if (checkKey === 'fontEmbedding' || checkKey === 'spotColors') {
-        // Rasterize all pages to resolve embedding/spot resources; this produces RGB pixels.
-        const pagesToFix = Array.from({ length: totalPages }, (_, i) => i + 1);
-        updatedBytes = await fixRasterizePages(arrayBuffer, pdfDoc, pagesToFix);
       }
 
       if (updatedBytes) {
@@ -814,8 +819,8 @@ export default function App() {
         // Re-run preflight scan to update the UI status
         setIsScanning(true);
         try {
-          const results = await runPreflightChecks(correctedFile, doc);
-          if (requestId === artworkLoadRequestIdRef.current) setPreflightResults(results);
+          const results = await runPreflightChecks(correctedFile, doc, printRequirements);
+          if (requestId === artworkLoadRequestIdRef.current) setPreflightResults({ ...results, scope: 'source' });
         } catch (scanErr) {
           console.error('Error re-scanning after fix:', scanErr);
         } finally {
@@ -1053,6 +1058,45 @@ export default function App() {
   };
 
   // Production export remains separate from the customer review proof.
+  const handleCheckProduction = async () => {
+    if (!canExport || artworkType !== 'pdf') return;
+    const requestId = ++scanRequestIdRef.current;
+    setIsScanning(true);
+    let document;
+    try {
+      const bytes = await createPreparedPdfBytes();
+      const file = new File([bytes], artworkFile.name, { type: 'application/pdf' });
+      document = await loadPDF(file);
+      const results = await runPreflightChecks(file, document, printRequirements);
+      if ((effectiveBleedAmount > 0 || trimCropEnabled || manualCropAmount > 0) &&
+          (pdfBoxInfo?.hasSourceAnnotations || pdfBoxInfo?.hasSourceForms)) {
+        results.checks.interactiveContent = {
+          status: 'warning', value: true,
+          details: 'The source PDF contains annotations or form fields. Their appearances are not included in this rebuilt output. Flatten intended printable appearances in the source file before printing.'
+        };
+      }
+      if (requestId === scanRequestIdRef.current) setPreflightResults({
+        ...results, scope: 'production', exportSettingsKey, bugFile
+      });
+    } catch (error) {
+      if (requestId === scanRequestIdRef.current) setNotice({ type: 'error', message: `Production check failed. ${error.message}` });
+    } finally {
+      if (document) await document.destroy();
+      if (requestId === scanRequestIdRef.current) setIsScanning(false);
+    }
+  };
+
+  const handleDownloadPreflightReport = () => {
+    if (!displayedPreflightResults) return;
+    const report = { ...displayedPreflightResults, bugFile: undefined };
+    const text = JSON.stringify({
+      filename: artworkFile.name, generatedAt: new Date().toISOString(),
+      certification: 'Production checks only; full PDF/X conformance and press rendering are not certified.',
+      ...report
+    }, null, 2);
+    downloadFile(new Blob([text], { type: 'application/json' }), `${artworkFile.name.replace(/\.[^/.]+$/, '')}_Preflight.json`);
+  };
+
   const handleUniversalExport = async () => {
     if (!canExport) return;
 
@@ -1401,10 +1445,15 @@ export default function App() {
                 />
               ) : (
                 <PreflightPanel
-                  results={preflightResults}
+                  results={displayedPreflightResults}
                   isScanning={isScanning}
                   bleedAmount={effectiveBleedAmount}
                   onRunFullCheck={handleRunFullPreflight}
+                  onCheckProduction={handleCheckProduction}
+                  canCheckProduction={Boolean(canExport)}
+                  onDownloadReport={handleDownloadPreflightReport}
+                  requirements={printRequirements}
+                  onRequirementsChange={requirements => { setPrintRequirements(requirements); setPreflightResults(null); }}
                   onFix={handlePreflightFix}
                   onReset={handleResetArtwork}
                   artworkType={artworkType}
@@ -1415,6 +1464,9 @@ export default function App() {
               {/* Universal Persistent Export Button at bottom of sidebar */}
               <div className="export-area">
                 {exportError && <p className="field-error" role="alert">{exportError}</p>}
+                {(pdfBoxInfo?.hasSourceAnnotations || pdfBoxInfo?.hasSourceForms) && (
+                  <p className="field-help">Source annotations/forms are present. Bleed, crop, and customer-proof exports omit their appearances. Flatten intended printable appearances before those operations.</p>
+                )}
                 <div className="proof-export-section">
                   <div className="export-heading">
                     <strong>Customer proof</strong>

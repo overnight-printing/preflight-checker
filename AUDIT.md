@@ -1,6 +1,6 @@
 # Application audit and fixes
 
-Reviewed and updated on 2026-10-05. This covers the React interface, upload lifecycle, print geometry, preflight analysis, image and PDF exports, customer proofs, browser memory use, deployment assets, and project documentation.
+Reviewed and updated on 2026-10-06. This covers the React interface, upload lifecycle, print geometry, preflight analysis, image and PDF exports, customer proofs, browser memory use, deployment assets, and project documentation.
 
 ## Implemented
 
@@ -29,15 +29,15 @@ Reviewed and updated on 2026-10-05. This covers the React interface, upload life
 | Image resolution | Images inside embedded pages could be reported as “vector only.” Nested Form transformations are included in effective DPI checks; image RGB and soft masks are detected. |
 | Bleed checks | Width/height averages could pass a file with zero bleed on one side. Every edge is checked. |
 | Overprint | Graphics states without `/Type /ExtGState`, including inline dictionaries, were missed. Detection and removal traverse reachable dictionaries. The wording no longer assumes every overprint is accidental. |
-| Fix labels | “Outline Fonts” and “Convert to CMYK” actually rasterized pages. Buttons now state **Rasterize at 300 DPI** and **Rasterize to RGB**, with the actual tradeoff beside them. |
-| Layers | Deleting `/OCProperties` is not reliable layer flattening. That fix was removed; layer visibility requires review. Geometry exports with optional content layers are blocked to avoid silently changing visibility. |
+| Fix labels | “Outline Fonts” and “Convert to CMYK” actually rasterized pages. Those rasterization actions were removed from the print repair UI. Missing fonts need embedding/outlining in the source app; unwanted spots need a color-managed conversion. |
+| Layers | Deleting `/OCProperties` is not reliable layer flattening. That fix was removed; layer visibility requires review. Geometry and proof exports now retain the catalog layer configuration and share its reference mapping with embedded artwork. Hidden content stays hidden, layers remain toggleable, and saving is supported. |
 | Rasterization | Clearing shared resource dictionaries could affect unrelated pages. Each corrected page gets local resources. Rendering retains the original orientation before the page rotation is applied. |
 | Bleed feedback | Applying mirror bleed left an unexplained source-file error. The report now identifies bleed scheduled for export and explains that the scan describes the source PDF. |
 | Multiple pages | Unvisited pages inherited the current page's absolute alignment and color. Export now computes alignment and automatic contrast independently for every selected page. |
 | Targeting | The preview displayed the stamp on excluded pages. It now follows the selected target pages. Empty selections no longer fall back to stamping the current page. |
 | Export readiness | Buttons could remain enabled without a valid preview, loaded stamp, valid crop, or valid page selection. They now reflect those requirements and show the reason. |
 | PDF worker | Loading required jsDelivr availability. The matching worker is bundled and uses the deployment base path. |
-| Startup | PDF engines loaded with the upload screen. They now load on demand; initial JavaScript fell from about 1.11 MB / 385 KB gzip to about 265 KB / 83 KB gzip. |
+| Startup | PDF engines loaded with the upload screen. They now load on demand; initial JavaScript fell from about 1.11 MB / 385 KB gzip to about 269 KB / 84 KB gzip. |
 | Memory | Every visited full page and every stamp tint could remain in memory. Preview caches are bounded; thumbnails render only while expanded, cancel unfinished work, and replaced PDF workers are destroyed. |
 | Compression | Tinted stamp streams became uncompressed. They now remain compressed; unchanged exports without a stamp return original bytes. |
 | Bleed rendering | Fractional antialias seams appeared between the original artwork and mirrored PDF edges. Reflections overlap by 0.1 point while reusing source resources. |
@@ -50,7 +50,7 @@ Reviewed and updated on 2026-10-05. This covers the React interface, upload life
 
 ## Verification
 
-- Unit suite: 43 passing tests, including shared geometry, page targeting, rotated stamp coordinates, invalid crops/files, and rotated/Unicode customer proofs.
+- Unit suite: 47 passing tests, including shared geometry, page targeting, rotated stamp coordinates, invalid crops/files, rotated/Unicode customer proofs, preserved layer references/output intents/blending spaces, and print requirement checks.
 - `npm run lint`, `npm run build`, and `git diff --check` pass.
 - `scripts/verify-browser.cjs` runs real Chrome uploads, analysis, replacement, unsupported drops, independent horizontal/vertical alignment, keyboard positioning, multi-page targeting, image DPI/bleed, and production/proof downloads. It also checks nested image DPI, composite font descriptors, asymmetric bleed, blank-page safety, and overprint removal. CDN requests are blocked. No browser exceptions occurred.
 - Interface screenshots cover 1440×900 dark, 375×812 light, and 812×375 dark. No horizontal document overflow was found. Rendered production PDFs and customer proofs were visually inspected.
@@ -64,16 +64,28 @@ Reviewed and updated on 2026-10-05. This covers the React interface, upload life
 | Rotated card + bleed | 270 × 162 pt | 18, 18 → 252, 144 | 90° | 0 |
 | Rotated card cropped to trim | 234 × 126 pt | 0, 0 → 234, 126 | 90° | 0 |
 
-A real two-page `newsom 6x4 postcard.pdf` with additional bleed and vector stamps exported from 661,214 bytes to 790,424 bytes (1.195×). Its Poppler inspection retained the source image color spaces and produced no RGB bleed-strip resources. The stamp adds roughly 118 KB to tiny generated PDFs; a ratio against their sub-1 KB source is dominated by that fixed vector asset, not full-page rasterization. Tinted synthetic exports decreased from roughly 159 KB to 120 KB after stream compression.
+A real two-page `newsom 6x4 postcard.pdf` with additional bleed and vector stamps exported from 661,214 bytes to 793,861 bytes (1.201×). Its Poppler inspection retained the source image color spaces and produced no RGB bleed-strip resources. The stamp adds roughly 118 KB to tiny generated PDFs; a ratio against their sub-1 KB source is dominated by that fixed vector asset, not full-page rasterization. Tinted synthetic exports decreased from roughly 159 KB to 120 KB after stream compression.
 
 The exact `newsom business card[51].pdf` and `Steinmeetz-for-Judge-5x9-front original.pdf` fixtures referenced by the spec were unavailable. Generated fixtures reproduce their documented dimensions and explicit boxes; the bundled Union Bug and a separate real production PDF were also used. Those two exact fixtures still need to be checked when available.
+
+
+## Commercial printing update
+
+- General commercial printing is the default; operators can set required bleed (including none) and minimum image DPI. PDF/X-4 and legacy PDF/X-1a requirement modes are also available, without claiming certification.
+- Production output can be analyzed after current crop, bleed, and stamp processing. Its report is invalidated when settings change; a downloadable JSON report identifies source versus production scope.
+- Added checks for finished trim/page box validity, embedded output-intent headers, PDF/X declarations, annotations/forms, and custom physical page units.
+- Kept modern transparency and spot inks as information; intentional overprint is a review item, and blank-page removal requires job context. Missing fonts are errors with source repair guidance.
+- Geometry/proof embedding uses one object copier for pages and catalog layers/output intents. Transparency blending groups are retained on the artwork Form XObject. Default black/white stamp tints use DeviceGray and isolated opaque knockout settings; original source overprint remains intact.
+- The layered regression contains genuinely hidden red draft artwork. Browser rendering checks the saved default visibility and deliberately reveals the layer in source, bleed, crop, and proof files. Actual app bleed export and production-report downloads are checked.
+
+Full PDF/X certification, ICC transformation/profile validation, white-overprint object analysis, total ink coverage and RIP separations are not implemented by this browser checker. Production checks cannot determine whether edge artwork is suitable bleed or whether a profile matches a particular press/paper; the job ticket and operator review remain necessary. Source annotation/form appearances are not embedded into rebuilt artwork or proof sheets. Both the source report and prepared production report identify that risk; those appearances must be flattened intentionally before those operations.
 
 ## Remaining capabilities and limits
 
 | Capability | Status / next requirement |
 | --- | --- |
 | Color-managed CMYK conversion and PDF/X validation | Requires output profiles, rendering intents, and a proper prepress engine. The app now describes RGB detection and rasterization honestly. |
-| True font outlining or repairing missing font programs | Requires the original fonts and a suitable font/prepress engine. Browser rasterization remains an explicit alternative. |
+| True font outlining or repairing missing font programs | Requires the original fonts and a suitable font/prepress engine. The print repair UI no longer offers rasterization with substituted fonts as a font repair. |
 | Reliable flattening of optional content layers | Requires preserving the source visibility configuration while rendering/flattening. The unsafe catalog-deletion action is unavailable. |
 | Full multilingual proof labels | Standard proof fonts cannot represent every Unicode character. Unsupported label glyphs become `?`; embedding a licensed multilingual font would preserve those labels exactly. Source artwork is unaffected. |
 | Very large/complex PDFs and arbitrary custom PDF structures | Processing still happens in browser memory. The 250 MB PDF limit prevents known excessive allocations; it does not guarantee every smaller complex file will fit. Password entry, PDF/X/output intents, arbitrary custom stamp coloring, annotations during rebuilt output, and nonstandard UserUnit handling need dedicated workflows. |

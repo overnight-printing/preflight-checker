@@ -12,12 +12,14 @@ import {
   endPath,
   concatTransformationMatrix,
   drawObject,
-  degrees
+  setGraphicsState,
+  degrees,
+  decodePDFRawStream
 } from 'pdf-lib';
 import { requiresRebuiltPdfOutput } from './pdfExportRouting';
 import { getOutputGeometry, rotateInsets, stampDrawOptions } from './pdfGeometry';
+import { createPDFPageEmbedder } from './pdfPageEmbedding';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { decodePDFRawStream } from 'pdf-lib/es/core/streams/decode.js';
 
 // Ship the matching worker with the app, including deployments under a base path.
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -92,6 +94,11 @@ export async function getPDFBoxInfo(file, pageNum) {
       trimBox: { x: trimBox.x, y: trimBox.y, width: trimBox.width, height: trimBox.height },
       bleedBox: { x: bleedBox.x, y: bleedBox.y, width: bleedBox.width, height: bleedBox.height },
       hasDistinctTrimBox,
+      hasSourceAnnotations: pages.some(sourcePage => {
+        const annotations = pdfDoc.context.lookup(sourcePage.node.get(PDFName.of('Annots')));
+        return annotations instanceof PDFArray && annotations.size() > 0;
+      }),
+      hasSourceForms: pdfDoc.catalog.has(PDFName.of('AcroForm')),
       rotation,
       trimInsets: rotateInsets(trimInsets, rotation),
       hasDistinctBleedBox,
@@ -129,6 +136,9 @@ function hexToPdfRgb(hex) {
 async function tintVectorPDF(bugDoc, targetColor) {
   const pdfRgb = hexToPdfRgb(targetColor);
   if (!pdfRgb) return; // Keep original black/grayscale
+  // Process black and white must not introduce registration-prone RGB mixes.
+  const fillColor = pdfRgb === '0.000 0.000 0.000' ? '0 g' : pdfRgb === '1.000 1.000 1.000' ? '1 g' : `${pdfRgb} rg`;
+  const strokeColor = pdfRgb === '0.000 0.000 0.000' ? '0 G' : pdfRgb === '1.000 1.000 1.000' ? '1 G' : `${pdfRgb} RG`;
 
   const pages = bugDoc.getPages();
   if (pages.length === 0) return;
@@ -146,12 +156,12 @@ async function tintVectorPDF(bugDoc, targetColor) {
 
         // Replace black colors: RGB ('0 0 0 rg' / '0 0 0 RG'), Grayscale ('0 g' / '0 G'), and CMYK ('0 0 0 1 k' / '0 0 0 1 K')
         // Supports decimals '0.0 0.0 0.0 rg' etc.
-        text = text.replace(/\b0(\.0+)?\s+0(\.0+)?\s+0(\.0+)?\s+rg\b/g, `${pdfRgb} rg`);
-        text = text.replace(/\b0(\.0+)?\s+0(\.0+)?\s+0(\.0+)?\s+RG\b/g, `${pdfRgb} RG`);
-        text = text.replace(/\b0(\.0+)?\s+g\b/g, `${pdfRgb} rg`);
-        text = text.replace(/\b0(\.0+)?\s+G\b/g, `${pdfRgb} RG`);
-        text = text.replace(/\b0(\.0+)?\s+0(\.0+)?\s+0(\.0+)?\s+1(\.0+)?\s+k\b/g, `${pdfRgb} rg`);
-        text = text.replace(/\b0(\.0+)?\s+0(\.0+)?\s+0(\.0+)?\s+1(\.0+)?\s+K\b/g, `${pdfRgb} RG`);
+        text = text.replace(/\b0(\.0+)?\s+0(\.0+)?\s+0(\.0+)?\s+rg\b/g, fillColor);
+        text = text.replace(/\b0(\.0+)?\s+0(\.0+)?\s+0(\.0+)?\s+RG\b/g, strokeColor);
+        text = text.replace(/\b0(\.0+)?\s+g\b/g, fillColor);
+        text = text.replace(/\b0(\.0+)?\s+G\b/g, strokeColor);
+        text = text.replace(/\b0(\.0+)?\s+0(\.0+)?\s+0(\.0+)?\s+1(\.0+)?\s+k\b/g, fillColor);
+        text = text.replace(/\b0(\.0+)?\s+0(\.0+)?\s+0(\.0+)?\s+1(\.0+)?\s+K\b/g, strokeColor);
 
         const newBytes = Uint8Array.from(text, character => character.charCodeAt(0));
         stream.contents = bugDoc.context.flateStream(newBytes).contents;
@@ -189,6 +199,17 @@ function drawClippedPageXObject(page, xObjectKey, clipRect, matrix) {
     drawObject(xObjectKey),
     popGraphicsState()
   );
+}
+
+function drawKnockoutStamp(page, stamp, placement) {
+  const state = page.doc.context.register(page.doc.context.obj({
+    Type: 'ExtGState', OP: false, op: false, OPM: 0,
+    ca: 1, CA: 1, BM: 'Normal', SMask: 'None'
+  }));
+  const key = page.node.newExtGState('UnionBugKnockout', state);
+  page.pushOperators(pushGraphicsState(), setGraphicsState(key));
+  page.drawPage(stamp, placement);
+  page.pushOperators(popGraphicsState());
 }
 
 function drawVectorPDFPageWithMirrorBleed(page, embeddedPage, baseBox, bleedPt) {
@@ -454,7 +475,7 @@ export async function stitchBugToPDF(
         const activePos = pagePositions[pageNum] || position;
         const activeSize = pageSizes[pageNum] || bugSize;
         const { angle, ...placement } = stampDrawOptions(activePos, activeSize, canvasScale, page.getCropBox(), page.getRotation().angle);
-        page.drawPage(await getEmbeddedBug(pdfDoc, pageNum), { ...placement, rotate: degrees(angle) });
+        drawKnockoutStamp(page, await getEmbeddedBug(pdfDoc, pageNum), { ...placement, rotate: degrees(angle) });
       }
     }
 
@@ -463,10 +484,8 @@ export async function stitchBugToPDF(
 
   // Option B: rebuilt print output for bleed, TrimBox crop, or manual crop.
   // Trim-only and bleed-only output preserve the original page as vector PDF.
-  if (pdfDoc.catalog.has(PDFName.of('OCProperties'))) {
-    throw new Error('This PDF contains optional content layers. Flatten the intended layer visibility in a PDF editor before adding bleed or cropping.');
-  }
   const outputDoc = await PDFDocument.create();
+  const embedArtworkPage = createPDFPageEmbedder(pdfDoc, outputDoc);
   for (let i = 0; i < pages.length; i++) {
     const pageNum = i + 1;
     const originalPage = pages[i];
@@ -486,7 +505,7 @@ export async function stitchBugToPDF(
     if (!originalPage.node.get(PDFName.of('Contents'))) {
       originalPage.drawRectangle({ x: sourceBox.x, y: sourceBox.y, width: 0.01, height: 0.01, opacity: 0 });
     }
-    const embeddedOriginalPage = await outputDoc.embedPage(originalPage, {
+    const embeddedOriginalPage = await embedArtworkPage(originalPage, {
       left: sourceBox.x,
       bottom: sourceBox.y,
       right: sourceBox.x + sourceBox.width,
@@ -502,7 +521,7 @@ export async function stitchBugToPDF(
       const activeSize = pageSizes[pageNum] || bugSize;
       const { angle, ...bugRect } = stampDrawOptions(activePos, activeSize, canvasScale, outputBox, originalPage.getRotation().angle);
 
-      newPage.drawPage(await getEmbeddedBug(outputDoc, pageNum), {
+      drawKnockoutStamp(newPage, await getEmbeddedBug(outputDoc, pageNum), {
         x: bugRect.x,
         y: bugRect.y,
         width: bugRect.width,

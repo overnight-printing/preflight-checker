@@ -2293,3 +2293,12 @@ fieldset:disabled { opacity: 0.65; }
 }
 .switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; z-index: 1; cursor: pointer; }
 .switch input:disabled { cursor: not-allowed; }
+
+.print-requirements { padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; }
+.print-requirements summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.print-requirements .select-field { margin-top: 12px; display: grid; gap: 6px; font-size: 12px; }
+.print-requirements .field-help { margin-top: 10px; }
+.print-readiness { display: grid; gap: 8px; padding: 12px; border-left: 3px solid var(--warning); background: var(--bg-card); font-size: 12px; }
+.print-readiness.has-errors { border-left-color: var(--danger); }
+.print-readiness span, .print-readiness p { color: var(--text-secondary); line-height: 1.5; }
+.preflight-actions { display: grid; gap: 8px; }

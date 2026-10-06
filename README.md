@@ -30,7 +30,7 @@ Overnight Preflight Tool helps production teams inspect incoming PDF files, appl
 
 ### PDF preflight
 
-- Runs 11 print-oriented checks on request, with pass, warning, and error counts.
+- Runs 16 print-oriented checks on source PDFs or prepared production output, with pass, review, error, and information counts.
 - Explains the source-file findings and which corrections are available.
 - Detects common issues involving bleed, image resolution, page size, fonts, colors, transparency, layers, overprint, blank pages, and PDF version.
 - Re-scans the corrected PDF after an automatic fix is applied.
@@ -133,7 +133,8 @@ Open the **Preflight** tab and review each result. A status can be:
 
 - **Pass** — no issue was detected by the current check.
 - **Warning** — review is recommended, but export is still available.
-- **Error (Fixable)** — the application offers an automatic correction.
+- **Error** — repair before printing; source-app repairs are required for some errors.
+- **Info** — a valid or declared feature is present; this is not an automatic defect.
 
 Use **Reset Artwork** at any time to return to the originally uploaded file.
 
@@ -141,7 +142,7 @@ Use **Reset Artwork** at any time to return to the originally uploaded file.
 
 Select an available fix for the issue you want to address. The application creates an updated in-memory PDF and runs the preflight scan again.
 
-Some fixes preserve vector content, while others rasterize affected pages at 300 DPI. Review [Automatic Fixes and Tradeoffs](#automatic-fixes-and-tradeoffs) before using the output in production.
+The available fixes preserve PDF resources. Missing fonts and unwanted spot inks need correction in the source application; the app does not present RGB rasterization as a print repair. Review [Automatic Fixes and Tradeoffs](#automatic-fixes-and-tradeoffs) before using the output in production.
 
 ### 4. Configure the Union Bug
 
@@ -192,17 +193,33 @@ Click **Save Production File** for production artwork.
 
 | Check | What the tool evaluates | Result behavior |
 | --- | --- | --- |
-| Image Resolution | Estimates effective resolution of embedded raster images | Warns below 300 DPI |
-| Bleed Margin | Compares TrimBox and BleedBox geometry | Errors when bleed is missing or below approximately 9 pt |
+| Image Resolution | Estimates effective resolution of embedded raster images | Warns below the selected job DPI target (default 300) |
+| Bleed Margin | Compares TrimBox and BleedBox geometry | Compares each edge against the selected job target (default 9 pt); no-bleed jobs are supported |
 | Overprint | Searches graphics-state dictionaries for enabled overprint flags | Offers overprint removal |
-| Font Embedding | Inspects referenced font descriptors for embedded font programs | Offers page rasterization |
+| Font Embedding | Inspects referenced font descriptors for embedded font programs | Requires embedding or outlining in the source application |
 | Color Mode | Looks for RGB color spaces in page resources and images | Warns when RGB content is detected |
 | Page Size Match | Compares page dimensions with the first page | Warns when dimensions differ by more than 3 pt |
-| Transparency | Inspects transparency groups, opacity, and blend modes | Warns when transparency is detected |
-| Spot Colors | Looks for Separation and DeviceN color spaces | Offers page rasterization |
+| Transparency | Inspects transparency groups, opacity, and blend modes | Informational for general/PDF/X-4 workflows; an error for legacy PDF/X-1a |
+| Spot Colors | Looks for Separation and DeviceN color spaces | Lists intended ink plates; requires color-managed source conversion for unwanted spots |
 | Blank Pages | Checks PDF.js painting operators, including paths and outlined artwork | Offers removal of the first flagged page while retaining at least one page |
 | Hidden Layers | Checks for optional-content configuration in the PDF catalog | Requests visibility review; removing the catalog alone is unsafe |
-| PDF Version | Reads the PDF header version | Warns below PDF 1.4 |
+| PDF Version | Reads the PDF header version | Checks the selected workflow; PDF/X-4 requires 1.6 or later |
+
+| Finished Trim & Page Boxes | Checks explicit TrimBoxes and containment of page boundaries | Flags missing trim and invalid boxes |
+| Press Output Profile | Reads embedded ICC output-intent headers and channel counts | Reports missing/unreadable profiles; asks for press/paper confirmation |
+| PDF/X Declaration | Reads source PDF/X metadata | Reports declarations without claiming full conformance |
+| Annotations & Forms | Checks for annotations and interactive form fields | Requests review/flattening of intended printable appearances |
+| Physical Page Units | Detects custom UserUnit scaling | Requests physical-dimension review for unusual PDFs |
+
+### Job requirements and production checks
+
+The default is **General commercial printing**, with editable targets of **300 DPI** and **0.125-inch bleed**. Open **Job requirements** to choose the actual resolution, required bleed (including none), or a PDF/X-4 / legacy PDF/X-1a job. Bleed and DPI are job-specific targets, not universal PDF/X requirements. Live transparency, spot inks, and optional layers can be intentional. Black overprint is not automatically an error, and blank pages can be intentional for binding or imposition.
+
+**Analyze PDF** evaluates the current source. **Check production output** first prepares the exact crop/bleed/stamp path, then analyzes that output. Production results are invalidated when those settings change. **Download preflight report** saves the checked scope, requirements, and results as JSON. A production check does not flatten source annotations or form-field appearances; review the source warnings before geometry changes or proofing. Production reports retain that warning when rebuilt output omits source annotations/forms.
+
+Output ICC intents, saved layer configurations and references, and page transparency blending groups are retained during resource-preserving export and customer proofing. Default black/white stamps use DeviceGray, avoiding an unnecessary RGB black. Stamps use isolated, opaque knockout settings, so inherited source overprint, masks, blend modes, or opacity cannot hide them.
+
+PDF/X requires self-contained fonts and defined output conditions; minimum DPI and bleed depend on the job. See the [PDF Association PDF/X requirements](https://pdfa.org/pdfx-the-key-facts/) and [Ghent Workgroup commercial print guidance](https://gwg.org/commercial-print/). Selecting a PDF/X workflow here does not convert or certify a PDF/X file.
 
 These checks are practical browser-side heuristics, not a replacement for a RIP, Acrobat Preflight, callas pdfToolbox, or a final press-operator review.
 
@@ -212,8 +229,6 @@ These checks are practical browser-side heuristics, not a replacement for a RIP,
 | --- | --- | --- |
 | Add Mirror Bleed | Creates a 9 pt mirrored extension around the artwork | Mirrored edges may be visible on artwork with text or distinct edge details |
 | Remove Overprint | Disables `OP` and `op` graphics-state flags | Changes intentional overprint behavior as well as accidental overprint |
-| Rasterize at 300 DPI | Rasterizes all pages to RGB images at 300 DPI | Text loses searchability and editability; this does not create vector outlines |
-| Rasterize to RGB | Rasterizes all pages at 300 DPI | Replaces source color spaces with RGB; this is not a CMYK conversion |
 | Remove Blank Pages | Deletes pages identified by the blank-page heuristic | Visually sparse or structurally unusual pages should be reviewed before removal |
 | Optional content layers | Review in a production PDF editor | No automatic flattening is offered |
 
@@ -257,7 +272,7 @@ All PDF dimensions use PDF points internally:
 
 When no bleed or manual/visual crop is active, the application can preserve the original PDF pages and add the Union Bug as a vector overlay.
 
-Mirror bleed, TrimBox cropping, and manual insets embed and clip the original PDF resources. They preserve vectors and source color spaces. Only the explicitly labeled rasterization fixes flatten PDF artwork.
+Mirror bleed, TrimBox cropping, and manual insets embed and clip the original PDF resources. They preserve vectors and source color spaces. Production processing does not rasterize PDF artwork.
 
 ## Multi-Page PDFs
 
@@ -358,10 +373,10 @@ The application has no database or server-side upload endpoint. Uploaded file da
 - Encrypted or malformed PDFs may fail to load.
 - Image DPI cannot be inferred reliably without complete physical-size metadata.
 - Automatic crop-mark detection depends on rendered pixel patterns and may require manual adjustment.
-- The font and spot-color rasterization fixes replace pages with RGB images at 300 DPI. Crop and bleed preserve PDF resources.
-- There is no vector font outlining or color-managed CMYK conversion; the available rasterization actions are labeled accordingly.
+- Missing fonts and unwanted spot inks must be repaired in the source application. Crop, bleed, and stamping preserve PDF resources.
+- There is no vector font outlining or color-managed CMYK conversion. Those require source fonts and the printer’s output profile.
 - RGB and spot-color detection is not a complete ICC/color-management workflow.
-- The tool does not provide PDF/X validation or output-intent verification.
+- PDF/X declarations and ICC output-intent headers are inspected, but full PDF/X conformance, ICC profile validity, font glyph coverage, white-overprint object analysis, separations, total ink coverage, and press rendering require a dedicated prepress engine.
 - Browser rendering can differ from a commercial RIP.
 
 ## Troubleshooting
@@ -391,7 +406,7 @@ npm run dev
 
 ### The exported PDF looks flattened
 
-Only the explicit font/spot-color rasterization fixes flatten artwork. Use **Reset Artwork** to restore the original PDF and its source color spaces.
+Current crop, bleed, stamping, and proof exports retain original PDF resources. Use **Reset Artwork** if an older session or externally modified PDF was rasterized.
 
 ### The Union Bug color does not change completely
 

@@ -1,5 +1,6 @@
 import { PDFDocument, PDFName, StandardFonts, rgb, degrees } from 'pdf-lib';
 import { rotatedSize } from './pdfGeometry.js';
+import { createPDFPageEmbedder } from './pdfPageEmbedding.js';
 
 const LETTER_PORTRAIT = [612, 792];
 const LETTER_LANDSCAPE = [792, 612];
@@ -77,6 +78,7 @@ export async function createCustomerProofPdf({
   if (sourcePages.length === 0) throw new Error('The artwork PDF does not contain any pages.');
 
   const proofDocument = await PDFDocument.create();
+  const embedArtworkPage = createPDFPageEmbedder(sourceDocument, proofDocument);
   const regularFont = await proofDocument.embedFont(StandardFonts.Helvetica);
   const boldFont = await proofDocument.embedFont(StandardFonts.HelveticaBold);
   const logo = logoPngBytes ? await proofDocument.embedPng(logoPngBytes) : null;
@@ -108,7 +110,7 @@ export async function createCustomerProofPdf({
     const sheetSize = displayBox.width > displayBox.height ? LETTER_LANDSCAPE : LETTER_PORTRAIT;
     const [sheetWidth, sheetHeight] = sheetSize;
     const sheet = proofDocument.addPage(sheetSize);
-    const embeddedArtwork = await proofDocument.embedPage(sourcePage, {
+    const embeddedArtwork = await embedArtworkPage(sourcePage, {
       left: artworkBox.x,
       bottom: artworkBox.y,
       right: artworkBox.x + artworkBox.width,

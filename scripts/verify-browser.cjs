@@ -3,6 +3,9 @@ const {
   PDFDocument,
   PDFName,
   PDFBool,
+  PDFString,
+  PDFOperator,
+  setGraphicsState,
   degrees,
   rgb,
   cmyk,
@@ -142,8 +145,32 @@ fs.mkdirSync(out, { recursive: true });
     );
   fs.writeFileSync(out + "/overprint.pdf", await overprint.save());
   const layers = await PDFDocument.load(fs.readFileSync(out + "/card.pdf"));
-  layers.catalog.set(PDFName.of("OCProperties"), layers.context.obj({ OCGs: [], D: {} }));
+  const artworkLayer = layers.context.register(layers.context.obj({ Type: "OCG", Name: PDFString.of("Artwork") }));
+  const draftLayer = layers.context.register(layers.context.obj({ Type: "OCG", Name: PDFString.of("Hidden draft") }));
+  layers.catalog.set(PDFName.of("OCProperties"), layers.context.obj({
+    OCGs: [artworkLayer, draftLayer],
+    D: { BaseState: "ON", ON: [artworkLayer], OFF: [draftLayer], Order: [artworkLayer, draftLayer] },
+  }));
+  const layeredPage = layers.getPage(0);
+  layeredPage.node.set(PDFName.of("Annots"), layers.context.obj([
+    layers.context.register(layers.context.obj({ Type: "Annot", Subtype: "Text", Rect: [1, 1, 5, 5], F: 4, Contents: PDFString.of("Print note"), P: layeredPage.ref })),
+  ]));
+  layeredPage.node.Resources().set(PDFName.of("Properties"), layers.context.obj({ Hidden: draftLayer }));
+  layeredPage.pushOperators(PDFOperator.of("BDC", [PDFName.of("OC"), PDFName.of("Hidden")]));
+  layeredPage.drawRectangle({ width: 252, height: 144, color: rgb(1, 0, 0) });
+  layeredPage.pushOperators(PDFOperator.of("EMC"));
   fs.writeFileSync(out + "/layers.pdf", await layers.save());
+  const inherited = await PDFDocument.create();
+  const inheritedPage = inherited.addPage([252, 144]);
+  inheritedPage.drawRectangle({ width: 252, height: 144, color: rgb(0, 0, 0) });
+  const inheritedState = inherited.context.register(inherited.context.obj({
+    Type: "ExtGState", OP: true, op: true, ca: 0, CA: 0, BM: "Multiply",
+  }));
+  inheritedPage.pushOperators(setGraphicsState(inheritedPage.node.newExtGState("Inherited", inheritedState)));
+  fs.writeFileSync(out + "/inherited-state.pdf", await inherited.save());
+  const simpleStamp = await PDFDocument.create();
+  simpleStamp.addPage([50, 20]).drawRectangle({ width: 50, height: 20, color: rgb(0, 0, 0) });
+  fs.writeFileSync(out + "/simple-stamp.pdf", await simpleStamp.save());
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 },
@@ -166,6 +193,8 @@ fs.mkdirSync(out, { recursive: true });
       "composite",
       "overprint",
       "layers",
+      "inherited-state",
+      "simple-stamp",
     ].map((name) => [
       name,
       Array.from(fs.readFileSync(out + "/" + name + ".pdf")),
@@ -185,14 +214,17 @@ fs.mkdirSync(out, { recursive: true });
       );
       const outputs = {};
       const checks = {};
-      let layersBlocked = false;
+
       for (const [name, bytes] of Object.entries(files)) {
+        if (name === "inherited-state" || name === "simple-stamp") continue;
         console.log("VERIFY " + name);
         const file = new File([new Uint8Array(bytes)], name + ".pdf", {
           type: "application/pdf",
         });
         const proxy = await processor.loadPDF(file);
         checks[name] = await runPreflightChecks(file, proxy);
+        if (name === "card") checks.noBleedJob = await runPreflightChecks(file, proxy, { bleedPoints: 0 });
+        if (name === "nested") checks.lowerDpiJob = await runPreflightChecks(file, proxy, { minDpi: 1 });
         if (name === "overprint") {
           const fixed = new File(
             [await fixOverprint(await file.arrayBuffer())],
@@ -204,12 +236,7 @@ fs.mkdirSync(out, { recursive: true });
         }
         console.log("VERIFY scanned " + name);
         await proxy.destroy();
-        if (name === "layers") {
-          try { await processor.stitchBugToPDF(file, null, "#000000", { left: 0, top: 0 }, { width: 1, height: 1 }, 1.5, [], 1, 9, false); }
-          catch (error) { layersBlocked = error.message.includes("optional content layers"); }
-          continue;
-        }
-        for (const mode of name === "rotated"
+        for (const mode of name === "layers" ? ["plain", "bleed", "inset"] : name === "rotated"
           ? ["plain", "bleed", "crop"]
           : name === "card"
             ? ["bleed", "inset", "empty-selection"]
@@ -241,6 +268,50 @@ fs.mkdirSync(out, { recursive: true });
           sourceName: "명함.pdf",
         }),
       );
+      outputs["layers-proof"] = Array.from(await createCustomerProofPdf({
+        sourcePdfBytes: new Uint8Array(outputs["layers-bleed"]), proofId: "LAYERS-42", sourceName: "layers.pdf",
+      }));
+      const layerVisibility = {};
+      for (const name of ["source", "layers-plain", "layers-bleed", "layers-inset", "layers-proof"]) {
+        const bytes = name === "source" ? files.layers : outputs[name];
+        const doc = await processor.loadPDF(new File([new Uint8Array(bytes)], name + ".pdf"));
+        try {
+          const config = await doc.getOptionalContentConfig({ intent: "display" });
+          const groups = Object.fromEntries(config);
+          const hiddenId = Object.keys(groups).find(id => groups[id].name === "Hidden draft");
+          const pdfPage = await doc.getPage(1);
+          const viewport = pdfPage.getViewport({ scale: 1 });
+          const canvas = document.createElement("canvas");
+          canvas.width = viewport.width; canvas.height = viewport.height;
+          const ctx = canvas.getContext("2d");
+          const renderPixel = async () => {
+            await pdfPage.render({ canvasContext: ctx, viewport, optionalContentConfigPromise: Promise.resolve(config) }).promise;
+            return Array.from(ctx.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data);
+          };
+          const defaultPixel = await renderPixel();
+          const hiddenVisible = config.getGroup(hiddenId).visible;
+          config.setVisibility(hiddenId, true);
+          layerVisibility[name] = { defaultPixel, hiddenVisible, revealedPixel: await renderPixel() };
+        } finally { await doc.destroy(); }
+      }
+      const stampVisibility = [];
+      for (const bleed of [0, 9]) {
+        const output = await processor.stitchBugToPDF(
+          new File([new Uint8Array(files["inherited-state"])], "inherited-state.pdf"),
+          new File([new Uint8Array(files["simple-stamp"])], "simple-stamp.pdf"),
+          "#ffffff", { left: 30, top: 30 }, { width: 50, height: 20 }, 1, [1], 1, bleed,
+        );
+        outputs["stamp-knockout-" + bleed] = Array.from(output);
+        const doc = await processor.loadPDF(new File([output], "stamp-output.pdf"));
+        try {
+          const pdfPage = await doc.getPage(1);
+          const viewport = pdfPage.getViewport({ scale: 1 });
+          const canvas = document.createElement("canvas"); canvas.width = viewport.width; canvas.height = viewport.height;
+          const ctx = canvas.getContext("2d");
+          await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+          stampVisibility.push(Array.from(ctx.getImageData(55, 40, 1, 1).data));
+        } finally { await doc.destroy(); }
+      }
       const blank = new File([new Uint8Array(files.card)], "card.pdf");
       let lastPageGuard = false;
       try {
@@ -266,7 +337,8 @@ fs.mkdirSync(out, { recursive: true });
       return {
         outputs,
         checks,
-        layersBlocked,
+        layerVisibility,
+        stampVisibility,
         lastPageGuard,
         imageSize: [bitmap.width, bitmap.height],
       };
@@ -277,13 +349,26 @@ fs.mkdirSync(out, { recursive: true });
     assert.equal(results.checks.nested.checks.resolution.status, "warning");
     assert.equal(results.checks.nested.checks.colorMode.status, "warning");
     assert.equal(results.checks.composite.checks.fontEmbedding.status, "pass");
-    assert.equal(results.checks.overprint.checks.overprint.status, "error");
+    assert.equal(results.checks.overprint.checks.overprint.status, "warning");
     assert.equal(results.checks.fixedOverprint.checks.overprint.status, "pass");
     assert.equal(results.checks.asymmetric.checks.bleed.status, "error");
+    assert.equal(results.checks.noBleedJob.checks.bleed.status, "pass");
+    assert.equal(results.checks.lowerDpiJob.checks.resolution.status, "pass");
     assert.equal(results.lastPageGuard, true);
-    assert.equal(results.layersBlocked, true);
+    for (const state of Object.values(results.layerVisibility)) {
+      assert.equal(state.hiddenVisible, false);
+      assert.ok(state.defaultPixel[2] > state.defaultPixel[0], "hidden draft stays hidden");
+      assert.deepEqual(state.revealedPixel, [255, 0, 0, 255], "the layer remains available when enabled");
+    }
     assert.equal(results.checks.layers.checks.hiddenLayers.fixable, false);
     assert.deepEqual(results.imageSize, [252, 144]);
+    assert.deepEqual(results.stampVisibility, [[255, 255, 255, 255], [255, 255, 255, 255]]);
+    for (const name of ["stamp-knockout-0", "stamp-knockout-9"]) {
+      const stamped = await PDFDocument.load(new Uint8Array(results.outputs[name]));
+      const states = stamped.getPage(0).node.Resources().lookup(PDFName.of("ExtGState"));
+      const knockout = states.keys().map(key => states.lookup(key)).find(state => state.get(PDFName.of("OP")) === PDFBool.False);
+      assert.equal(knockout.get(PDFName.of("op")), PDFBool.False);
+    }
     const withStamp = await PDFDocument.load(
       Buffer.from(results.outputs["card-bleed"]),
     );
@@ -343,14 +428,44 @@ fs.mkdirSync(out, { recursive: true });
       .click();
     const download = await downloadPromise;
     await download.saveAs(out + "/ui-card-production.pdf");
+    await page.locator("input[type=file]").first().setInputFiles(out + "/layers.pdf");
+    await page.locator(".artwork-canvas canvas").waitFor();
+    await page.getByRole("button", { name: "Bleed & Trim", exact: false }).click();
+    await page.getByRole("checkbox", { name: "Add mirror bleed", exact: true }).check();
+    await page.locator(".loading-overlay").waitFor({ state: "hidden" });
+    const layeredDownloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Save Production File", exact: true }).click();
+    await (await layeredDownloadPromise).saveAs(out + "/ui-layers.pdf");
+    await page.getByRole("button", { name: "Preflight", exact: true }).click();
+    await page.getByRole("button", { name: "Check production output", exact: true }).click();
+    await page.getByText(/Checked production output/).waitFor();
+    await page.getByText('Bleed meets the job target (0.125" each edge)', { exact: true }).waitFor();
+    const reportPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download preflight report", exact: true }).click();
+    await (await reportPromise).saveAs(out + "/ui-preflight.json");
+    const report = JSON.parse(fs.readFileSync(out + "/ui-preflight.json", "utf8"));
+    assert.equal(report.scope, "production");
+    assert.equal(report.checks.bleed.status, "pass");
+    assert.equal(report.requirements.workflow, "general");
+    assert.equal(report.checks.interactiveContent.status, "warning");
+    assert.ok(report.checks.interactiveContent.details.includes("source PDF"));
+    await page.getByRole("button", { name: "Stamper Settings", exact: true }).click();
+    if (await page.getByRole("checkbox", { name: "Add mirror bleed", exact: true }).count() === 0)
+      await page.getByRole("button", { name: "Bleed & Trim", exact: false }).click();
+    await page.getByRole("checkbox", { name: "Add mirror bleed", exact: true }).uncheck();
+    await page.locator(".loading-overlay").waitFor({ state: "hidden" });
+    await page.getByRole("button", { name: "Preflight", exact: true }).click();
+    assert.equal(await page.getByText(/Checked production output/).count(), 0);
+    await page.getByRole("button", { name: "Analyze PDF", exact: true }).waitFor();
+    await page.getByRole("button", { name: "Stamper Settings", exact: true }).click();
+
     await page
       .locator("input[type=file]")
       .first()
       .setInputFiles(out + "/judge.pdf");
     await page.getByText('5.00" × 9.00"', { exact: true }).waitFor();
-    await page
-      .getByRole("button", { name: "Bleed & Trim", exact: false })
-      .click();
+    if (await page.getByRole("checkbox", { name: "Add mirror bleed", exact: true }).count() === 0)
+      await page.getByRole("button", { name: "Bleed & Trim", exact: false }).click();
     assert.equal(
       await page
         .getByRole("checkbox", { name: "Add mirror bleed", exact: true })

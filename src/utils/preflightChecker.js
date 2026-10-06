@@ -1,19 +1,20 @@
-import { PDFDocument, PDFName, PDFRawStream, PDFArray, PDFDict, PDFBool, PDFNumber } from 'pdf-lib';
-import { decodePDFRawStream } from 'pdf-lib/es/core/streams/decode';
+import { PDFDocument, PDFName, PDFRawStream, PDFArray, PDFDict, PDFBool, PDFNumber, decodePDFRawStream } from 'pdf-lib';
 import { OPS } from 'pdfjs-dist';
 import { rotatedSize } from './pdfGeometry';
+import { normalizePrintRequirements, getPrintDocumentChecks } from './printRequirements.js';
 
 // Expected sizes helper removed - page size consistency check used instead.
 
 /**
- * Runs all 11 preflight checks on the PDF.
+ * Runs print checks against the selected job requirements.
  * 
  * @param {File} file - The uploaded PDF file
  * @param {Object} pdfjsDoc - The PDF.js document proxy
- * @param {string} expectedSizeKey - Key of the expected page size (e.g. 'letter', 'a4')
+ * @param {Object} printRequirements - Workflow, minimum DPI, and required bleed
  * @returns {Promise<Object>} Results of all checks
  */
-export async function runPreflightChecks(file, pdfjsDoc) {
+export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {}) {
+  const requirements = normalizePrintRequirements(printRequirements);
   const arrayBuffer = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(arrayBuffer);
   const pages = pdfDoc.getPages();
@@ -37,18 +38,20 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   const results = {
     numPages,
     pdfVersion,
+    requirements,
     checks: {
-      resolution: { status: 'pass', details: 'All images are 300 DPI or higher', value: null },
-      bleed: { status: 'pass', details: 'Bleed is 0.125" (9pt) or larger', value: null, fixable: true },
+      resolution: { status: 'pass', details: 'Placed images meet the job resolution target', value: null },
+      bleed: { status: 'pass', details: `Bleed meets the job target (${(requirements.bleedPoints / 72).toFixed(3)}" each edge)`, value: null, fixable: true },
       overprint: { status: 'pass', details: 'No overprint flags detected', value: null, fixable: true },
-      fontEmbedding: { status: 'pass', details: 'All fonts are embedded', value: [], fixable: true },
+      fontEmbedding: { status: 'pass', details: 'Referenced font programs are embedded', value: [], fixable: false },
       colorMode: { status: 'pass', details: 'Process colors (CMYK/Grayscale) only', value: null },
       pageSize: { status: 'pass', details: 'Page sizes are consistent', value: null },
       transparency: { status: 'pass', details: 'No unflattened transparency detected', value: null },
-      spotColors: { status: 'pass', details: 'No spot colors detected', value: [], fixable: true },
+      spotColors: { status: 'pass', details: 'No spot colors detected', value: [], fixable: false },
       blankPages: { status: 'pass', details: 'No blank pages detected', value: [], fixable: true },
       hiddenLayers: { status: 'pass', details: 'No optional content layers detected', value: null },
-      pdfVersionCheck: { status: 'pass', details: 'PDF version is 1.4 or higher', value: null }
+      pdfVersionCheck: { status: 'pass', details: `PDF version is ${pdfVersion}`, value: null },
+      ...getPrintDocumentChecks(pdfDoc, requirements)
     }
   };
 
@@ -58,6 +61,7 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   let totalImages = 0;
   let hasInsufficientBleed = false;
   let hasOverprint = false;
+  let unmeasuredImages = false;
   const nonEmbeddedFonts = new Set();
   let hasRGBContent = false;
   let hasPageSizeMismatch = false;
@@ -69,20 +73,20 @@ export async function runPreflightChecks(file, pdfjsDoc) {
 
   // 1. PDF Version check (Warning only)
   const versionNum = parseFloat(results.pdfVersion);
-  if (isNaN(versionNum) || versionNum < 1.4) {
+  if (isNaN(versionNum) || (requirements.workflow === 'pdfx4' && versionNum < 1.6)) {
     results.checks.pdfVersionCheck = {
-      status: 'warning',
-      details: `PDF Version is ${results.pdfVersion}. Recommend PDF 1.4 or higher for print stability.`,
+      status: requirements.workflow === 'pdfx4' ? 'error' : 'warning',
+      details: `PDF Version is ${results.pdfVersion}. PDF/X-4 requires PDF 1.6 or later. Re-export for the selected workflow.`,
       value: results.pdfVersion
     };
   }
 
-  // 2. Hidden Layers check (Fixable)
+  // Optional layers are valid in modern workflows and retained by export.
   const catalog = pdfDoc.catalog;
   if (catalog.has(PDFName.of('OCProperties'))) {
     results.checks.hiddenLayers = {
       status: 'warning',
-      details: 'Optional content layers detected. Review layer visibility in a production PDF editor before printing.',
+      details: 'Optional content layers detected. Export preserves the saved layer configuration. Confirm print visibility with the printer; screen and print visibility may differ.',
       value: true,
       fixable: false
     };
@@ -148,7 +152,10 @@ export async function runPreflightChecks(file, pdfjsDoc) {
                 ? descendants.asArray().map(lookup) : [fontObj];
               const isEmbedded = fontPrograms.length > 0 && fontPrograms.every((font) => {
                 const descriptor = font instanceof PDFDict && lookup(font.get(PDFName.of('FontDescriptor')));
-                return descriptor instanceof PDFDict && ['FontFile', 'FontFile2', 'FontFile3'].some(key => descriptor.has(PDFName.of(key)));
+                return descriptor instanceof PDFDict && ['FontFile', 'FontFile2', 'FontFile3'].some(key => {
+                  const program = lookup(descriptor.get(PDFName.of(key)));
+                  return program instanceof PDFRawStream && program.contents.length > 0;
+                });
               });
 
               if (!isEmbedded) {
@@ -168,9 +175,10 @@ export async function runPreflightChecks(file, pdfjsDoc) {
           if (csVal instanceof PDFArray) {
             const csName = csVal.get(0).toString();
             if (csName === '/Separation' || csName === '/DeviceN') {
-              const spotName = csVal.get(1).toString().replace('/', '');
-              if (spotName !== 'All' && spotName !== 'None') {
-                spotColorsFound.add(spotName);
+              const names = lookup(csVal.get(1));
+              for (const name of names instanceof PDFArray ? names.asArray() : [names]) {
+                const spotName = name?.toString().replace(/^\//, '');
+                if (spotName && !['All', 'None', 'Cyan', 'Magenta', 'Yellow', 'Black'].includes(spotName)) spotColorsFound.add(spotName);
               }
             } else if (csName === '/DeviceRGB' || csName === '/CalRGB') {
               hasRGBContent = true;
@@ -211,13 +219,15 @@ export async function runPreflightChecks(file, pdfjsDoc) {
     }
 
     // Bleed calculation
-    if (!trimBox) {
+    if (requirements.bleedPoints === 0) {
+      // Bleed is a job requirement; some products do not require it.
+    } else if (!trimBox) {
       hasInsufficientBleed = true; // Missing TrimBox = no bleed defined
     } else {
       const margins = [trimBox.x - bleedBox.x, trimBox.y - bleedBox.y,
         bleedBox.x + bleedBox.width - trimBox.x - trimBox.width,
         bleedBox.y + bleedBox.height - trimBox.y - trimBox.height];
-      if (margins.some(value => value < 8.9)) {
+      if (margins.some(value => value < requirements.bleedPoints - 0.1)) {
         hasInsufficientBleed = true;
       }
     }
@@ -251,7 +261,7 @@ export async function runPreflightChecks(file, pdfjsDoc) {
           const transform = formMatrix instanceof PDFArray ? formMatrix.asArray().map(value => lookup(value).asNumber()) : [1, 0, 0, 1];
           let formText;
           try { formText = new TextDecoder('latin1').decode(decodePDFRawStream(object).decode()); }
-          catch { continue; }
+          catch { unmeasuredImages = true; continue; }
           if (/(?:^|\s)(?:rg|RG)(?:\s|$)/.test(formText)) hasRGBContent = true;
           for (const draw of draws) scanImages(formResources, formText, multiplyLinearMatrices(draw.matrix, transform), new Set(ancestors).add(object));
         } else if (object.dict.get(PDFName.of('Subtype')) === PDFName.of('Image') && draws.length > 0) {
@@ -260,7 +270,8 @@ export async function runPreflightChecks(file, pdfjsDoc) {
           const height = object.dict.get(PDFName.of('Height'))?.asNumber() || 0;
           for (const draw of draws) {
             const dpi = Math.min(width / draw.width, height / draw.height) * 72;
-            if (Number.isFinite(dpi)) { minDPI = Math.min(minDPI, dpi); if (dpi < 300) hasLowRes = true; }
+            if (Number.isFinite(dpi)) { minDPI = Math.min(minDPI, dpi); if (dpi < requirements.minDpi) hasLowRes = true; }
+            else unmeasuredImages = true;
           }
           const cs = lookup(object.dict.get(PDFName.of('ColorSpace')));
           if (isRgbColorSpace(cs, lookup)) hasRGBContent = true;
@@ -274,6 +285,7 @@ export async function runPreflightChecks(file, pdfjsDoc) {
     // Missing text and XObjects alone is not evidence that a page is blank.
     const pdfjsPage = await pdfjsDoc.getPage(pageNum);
     const operatorList = await pdfjsPage.getOperatorList();
+    if (operatorList.fnArray.some(op => [OPS.paintInlineImageXObject, OPS.paintInlineImageXObjectGroup].includes(op))) unmeasuredImages = true;
     const paintOperators = new Set([
       OPS.stroke, OPS.closeStroke, OPS.fill, OPS.eoFill, OPS.fillStroke,
       OPS.eoFillStroke, OPS.closeFillStroke, OPS.closeEOFillStroke, OPS.shadingFill, OPS.rawFillPath,
@@ -290,14 +302,16 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   if (hasInsufficientBleed) {
     results.checks.bleed = {
       status: 'error',
-      details: 'Insufficient bleed (under 0.125" / 9pt) or missing TrimBox. Prepress requires bleed for cutting margin.',
+      details: `Bleed is below the job target (${(requirements.bleedPoints / 72).toFixed(3)}" each edge) or the finished TrimBox is missing. Confirm edge artwork extends beyond the cut line.`,
       value: false,
       fixable: true
     };
   }
 
   // Update Image Resolution Status
-  if (totalImages === 0) {
+  if (unmeasuredImages) {
+    results.checks.resolution = { status: 'warning', details: 'Some inline images or unsupported image resources could not be measured. Verify their effective resolution in a production PDF editor.', value: Number.isFinite(minDPI) ? Math.round(minDPI) : null };
+  } else if (totalImages === 0) {
     results.checks.resolution = {
       status: 'pass',
       details: 'No images detected in document (vector only).',
@@ -306,13 +320,13 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   } else if (hasLowRes) {
     results.checks.resolution = {
       status: 'warning',
-      details: `Low resolution images detected. Minimum found: ${Math.round(minDPI)} DPI (300 DPI recommended for print).`,
+      details: `Low resolution images detected. Minimum found: ${Math.round(minDPI)} DPI; job target: ${requirements.minDpi} DPI. Re-export from higher-resolution source artwork.`,
       value: Math.round(minDPI)
     };
   } else {
     results.checks.resolution = {
       status: 'pass',
-      details: `All images are high resolution (300+ DPI). Minimum: ${Math.round(minDPI)} DPI.`,
+      details: `All measured images meet the ${requirements.minDpi} DPI job target. Minimum: ${Math.round(minDPI)} DPI.`,
       value: Math.round(minDPI)
     };
   }
@@ -320,8 +334,8 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   // Update Overprint Status
   if (hasOverprint) {
     results.checks.overprint = {
-      status: 'error',
-      details: 'Overprint settings detected. Review whether they are intentional. Overprinting can cause colors to blend unexpectedly on press.',
+      status: 'warning',
+      details: 'Overprint settings detected. Black/text overprint can be intentional; white overprint may disappear on press. Review separations in a production PDF editor before removing overprint.',
       value: true,
       fixable: true
     };
@@ -331,17 +345,19 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   if (nonEmbeddedFonts.size > 0) {
     results.checks.fontEmbedding = {
       status: 'error',
-      details: `Non-embedded fonts detected: ${Array.from(nonEmbeddedFonts).join(', ')}. Fonts must be embedded or outlined.`,
+      details: `Missing font programs: ${Array.from(nonEmbeddedFonts).join(', ')}. Embed fonts or outline text in the source application. Rasterizing with substituted fonts does not repair missing fonts.`,
       value: Array.from(nonEmbeddedFonts),
-      fixable: true
+      fixable: false
     };
   }
 
   // Update Color Mode Status
   if (hasRGBContent) {
     results.checks.colorMode = {
-      status: 'warning',
-      details: 'RGB colors or RGB images detected. Review color management before printing; this tool does not convert RGB to CMYK.',
+      status: requirements.workflow === 'legacy' ? 'error' : 'warning',
+      details: requirements.workflow === 'legacy'
+        ? 'RGB artwork detected. PDF/X-1a requires CMYK/spot colors; convert using the printer’s ICC profile in the source application.'
+        : 'RGB artwork detected. Color-managed RGB can be valid in PDF/X-4. Confirm source profiles and the press output intent; this tool preserves colors and does not convert to CMYK.',
       value: 'RGB'
     };
   }
@@ -370,8 +386,9 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   // Update Transparency Status
   if (hasTransparency) {
     results.checks.transparency = {
-      status: 'warning',
-      details: 'Unflattened transparency (opacity or blend modes) detected. May cause processing anomalies on legacy RIPs.',
+      status: requirements.workflow === 'legacy' ? 'error' : 'info',
+      details: requirements.workflow === 'legacy' ? 'Live transparency detected. PDF/X-1a requires flattening in a color-managed prepress application.'
+        : 'Live transparency detected and retained. PDF/X-4 supports transparency; confirm the printer uses a compatible RIP.',
       value: true
     };
   }
@@ -379,10 +396,10 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   // Update Spot Colors Status
   if (spotColorsFound.size > 0) {
     results.checks.spotColors = {
-      status: 'warning',
-      details: `Spot colors detected: ${Array.from(spotColorsFound).join(', ')}. Spot colors may require separate ink plates. Review with your printer; rasterization converts to RGB.`,
+      status: 'info',
+      details: `Spot inks: ${Array.from(spotColorsFound).join(', ')}. Confirm these plates are intended; convert unwanted spots using the printer's color-managed workflow.`,
       value: Array.from(spotColorsFound),
-      fixable: true
+      fixable: false
     };
   }
 
@@ -390,7 +407,7 @@ export async function runPreflightChecks(file, pdfjsDoc) {
   if (blankPagesList.length > 0) {
     results.checks.blankPages = {
       status: 'warning',
-      details: `Blank pages detected: Page(s) ${blankPagesList.join(', ')}. Blank pages should be removed prior to print submission.`,
+      details: `Blank pages detected: Page(s) ${blankPagesList.join(', ')}. They may be intentional for binding or imposition. Confirm the job ticket before removing them.`,
       value: blankPagesList,
       fixable: numPages > 1
     };

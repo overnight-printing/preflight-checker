@@ -7,6 +7,11 @@ import subprocess
 
 output = Path(os.environ.get('PREFLIGHT_AUDIT_OUTPUT', 'output/audit')).resolve()
 expected = {
+    'stamp-knockout-0': ((252, 144), (0, 0, 252, 144), 0),
+    'stamp-knockout-9': ((270, 162), (9, 9, 261, 153), 0),
+    'layers-bleed': ((270, 162), (9, 9, 261, 153), 0),
+    'layers-inset': ((246, 138), (0, 0, 246, 138), 0),
+    'ui-layers': ((270, 162), (9, 9, 261, 153), 0),
     'card-bleed': ((270, 162), (9, 9, 261, 153), 0),
     'card-inset': ((246, 138), (0, 0, 246, 138), 0),
     'card-empty-selection': ((252, 144), (0, 0, 252, 144), 0),
@@ -31,7 +36,7 @@ for name, (size, trim, rotation) in expected.items():
     (output / f'{name}-verification.txt').write_text(info + '\n' + images)
     summary[name] = {'bytes': pdf.stat().st_size, 'size': size, 'trim': trim, 'rotation': rotation, 'images': 0}
 
-for name in [*expected, 'rotated-proof', 'ui-image-proof', 'ui-multi']:
+for name in [*expected, 'rotated-proof', 'ui-image-proof', 'ui-multi', 'layers-proof']:
     pdf = output / f'{name}.pdf'
     subprocess.run(['pdftoppm', '-scale-to', '1100', '-png', str(pdf), str(output / name)], check=True, capture_output=True)
     if name not in expected:
