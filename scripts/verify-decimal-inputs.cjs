@@ -21,6 +21,27 @@ const path = require('node:path');
     await page.locator('.artwork-canvas canvas').waitFor();
     const save = page.getByRole('button', { name: 'Save Production File', exact: true });
     const ready = () => page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent === 'Save Production File' && !button.disabled));
+    const verifyFields = async (fields) => {
+      const style = locator => locator.evaluate(element => {
+        const css = getComputedStyle(element);
+        return { radius: css.borderRadius, fontSize: css.fontSize, background: css.backgroundColor, color: css.color, borderWidth: css.borderWidth, height: css.minHeight };
+      });
+      const standard = await style(page.getByLabel('Estimate or invoice number', { exact: true }));
+      assert.equal(standard.radius, '8px');
+      assert.equal(standard.height, page.viewportSize().width <= 700 ? '44px' : '36px');
+      for (const field of fields) assert.deepEqual(await style(field), standard);
+    };
+    const verifySwitches = async () => {
+      const switches = await page.locator('.switch').evaluateAll(elements => elements.map(element => {
+        const input = element.querySelector('input'), track = element.querySelector('.slider-switch');
+        return { width: element.getBoundingClientRect().width, checked: input.checked, thumb: getComputedStyle(track, '::before').backgroundColor };
+      }));
+      assert.ok(switches.length >= 4);
+      for (const toggle of switches) {
+        assert.equal(toggle.width, 44);
+        if (toggle.checked) assert.equal(toggle.thumb, 'rgb(255, 255, 255)');
+      }
+    };
     const type = async (input, text) => {
       await input.fill('');
       await input.evaluate(element => { window.testDecimalInput = element; });
@@ -81,6 +102,8 @@ const path = require('node:path');
     await type(safe, '0.15');
     await safe.press('Tab');
     assert.equal(await safe.inputValue(), '0.1500');
+    await verifyFields([bleed, crop, safe, page.locator('#pdf-output-mode')]);
+    await verifySwitches();
     await page.screenshot({ path: out + '/decimal-inputs.png', fullPage: true });
 
     await page.getByRole('button', { name: 'Preflight', exact: true }).click();
@@ -88,6 +111,10 @@ const path = require('node:path');
     await page.getByLabel('Finished order size', { exact: true }).selectOption('custom');
     await page.getByRole('button', { name: 'Analyze PDF', exact: true }).click();
     await page.getByRole('button', { name: 'Re-analyze', exact: true }).waitFor();
+    for (const name of ['Reset Artwork', 'Re-analyze']) {
+      const style = await page.getByRole('button', { name, exact: true }).evaluate(element => ({ radius: getComputedStyle(element).borderRadius, border: getComputedStyle(element).borderStyle }));
+      assert.deepEqual(style, { radius: '8px', border: 'solid' });
+    }
     const width = page.getByLabel('Order width in inches', { exact: true });
     await type(width, '3.5');
     await width.press('Enter');
@@ -95,6 +122,7 @@ const path = require('node:path');
     await type(height, '2.0');
     await height.press('Tab');
     await ready();
+    await verifyFields([width, height, page.getByLabel('Finished order size', { exact: true })]);
     const download = page.waitForEvent('download');
     await save.click();
     await (await download).saveAs(out + '/decimal-inputs.pdf');
@@ -102,6 +130,24 @@ const path = require('node:path');
     const box = output.getPage(0).getMediaBox();
     assert.ok(Math.abs(box.width - 267.12) < 0.001);
     assert.ok(Math.abs(box.height - 159.12) < 0.001);
+    for (const theme of ['light', 'dark']) {
+      await page.getByRole('button', { name: `Use ${theme} theme`, exact: true }).click();
+      await page.waitForFunction(value => document.documentElement.dataset.theme === value, theme);
+      if (!await page.locator('details.print-requirements').evaluate(element => element.open)) await page.getByText('Job requirements', { exact: true }).click();
+      await verifyFields([width, height, page.getByLabel('Finished order size', { exact: true })]);
+      await page.screenshot({ path: out + `/ui-preflight-${theme}.png`, fullPage: true });
+      await page.getByRole('button', { name: 'Stamper Settings', exact: true }).click();
+      await verifyFields([bleed, crop, safe, page.locator('#pdf-output-mode')]);
+      await verifySwitches();
+      await page.screenshot({ path: out + `/ui-stamper-${theme}.png`, fullPage: true });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await verifyFields([bleed, crop, safe]);
+      await verifySwitches();
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Controls must not create mobile horizontal overflow');
+      await page.screenshot({ path: out + `/ui-stamper-mobile-${theme}.png`, fullPage: true });
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.getByRole('button', { name: 'Preflight', exact: true }).click();
+    }
     assert.deepEqual(errors, []);
     console.log('Decimal inputs passed: continuous typing, caret edits, Enter/Tab, invalid drafts, Escape, steppers, preset sync, safe zone, order dimensions, and crop/bleed export.');
   } finally { await browser.close(); }

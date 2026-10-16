@@ -118,7 +118,6 @@ export default function PreflightPanel({
           <span className="section-title" style={{ marginBottom: 0 }}>Preflight Summary</span>
           <button
             className="btn btn-secondary"
-            style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', borderStyle: 'dashed' }}
             onClick={onReset}
             title="Reset to original artwork"
           >
@@ -134,7 +133,6 @@ export default function PreflightPanel({
           </p>
           <button
             className="btn btn-primary btn-action-block"
-            style={{ padding: '12px', fontSize: '14px' }}
             onClick={onRunFullCheck}
           >
             Analyze PDF
@@ -189,7 +187,6 @@ export default function PreflightPanel({
         <span className="section-title" style={{ marginBottom: 0 }}>Preflight Summary</span>
         <button 
           className="btn btn-secondary" 
-          style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '6px', borderStyle: 'dashed' }}
           onClick={onReset}
           title="Reset to original artwork"
         >
@@ -261,7 +258,6 @@ export default function PreflightPanel({
           <span className="section-title" style={{ marginBottom: 0 }}>Preflight Checks</span>
           <button
             className="btn btn-secondary"
-            style={{ padding: '6px 10px', fontSize: '12px', borderRadius: '6px' }}
             onClick={onRunFullCheck}
           >
             Re-analyze
@@ -315,14 +311,6 @@ export default function PreflightPanel({
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
                     <button
                       className="btn btn-secondary"
-                      style={{ 
-                        padding: '6px 12px', 
-                        fontSize: '12px', 
-                        borderRadius: '6px',
-                        borderColor: check.status === 'error' ? 'rgba(239, 68, 68, 0.3)' : 'var(--border-color)',
-                        background: check.status === 'error' ? 'rgba(239, 68, 68, 0.05)' : 'rgba(255,255,255,0.02)',
-                        color: check.status === 'error' ? 'var(--danger)' : 'var(--text-primary)'
-                      }}
                       onClick={() => onFix(key)}
                     >
                       {getFixButtonText(key)}
