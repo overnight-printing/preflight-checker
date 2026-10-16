@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PDFDocument, PDFName, cmyk } from 'pdf-lib';
 import { detectCropMarks } from '../src/utils/cropMarkDetection.js';
-import { getCropMarkLines, getReviewedTrimBox, getVisibleBoxInsets } from '../src/utils/cropMarks.js';
+import { getCropMarkLines, getReviewedTrimBox, getVisibleBoxInsets, getUniformTrimInset } from '../src/utils/cropMarks.js';
 import { getOutputGeometry } from '../src/utils/pdfGeometry.js';
 import { applyReviewedTrim } from '../src/utils/reviewedTrim.js';
 import { requiresRebuiltPdfOutput } from '../src/utils/pdfExportRouting.js';
@@ -83,6 +83,12 @@ test('thin antialiased marks retain their subpixel center lines', () => {
   assert.ok(Math.abs(detection.insets.left - 36.13) < 0.01);
   assert.ok(Math.abs(360 - detection.insets.left - detection.insets.right - trim.width) < 0.01);
   assert.ok(Math.abs(252 - detection.insets.top - detection.insets.bottom - trim.height) < 0.01);
+});
+
+test('near-equal printed margins use one centered inset, without guessing across asymmetric margins', () => {
+  assert.ok(Math.abs(getUniformTrimInset({ top: 17.64, left: 17.64, right: 16.44, bottom: 16.44 }) - 17.04) < 0.001);
+  assert.equal(getUniformTrimInset({ top: 24, left: 30, right: 42, bottom: 42 }), null);
+  assert.equal(getUniformTrimInset({ top: NaN, left: 0, right: 0, bottom: 0 }), null);
 });
 
 test('trim inset mapping round-trips rotations and offset source boxes', () => {

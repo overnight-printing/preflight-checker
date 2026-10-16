@@ -1,5 +1,6 @@
 import { AnnotationMode } from 'pdfjs-dist';
 import { detectCropMarks } from './cropMarkDetection.js';
+import { getUniformTrimInset } from './cropMarks.js';
 
 export async function detectPageCropMarks(page, signal) {
   const size = page.getViewport({ scale: 1 });
@@ -23,6 +24,12 @@ export async function detectPageCropMarks(page, signal) {
     if (result.insets) {
       result.insets.right -= canvas.width / scale - size.width;
       result.insets.bottom -= canvas.height / scale - size.height;
+      // Center near-equal margins instead of exposing small raster/export offsets as four different insets.
+      const inset = getUniformTrimInset(result.insets);
+      if (inset !== null) {
+        result.insets = { top: inset, right: inset, bottom: inset, left: inset };
+        result.uniformInset = true;
+      }
     }
     return result;
   } finally {

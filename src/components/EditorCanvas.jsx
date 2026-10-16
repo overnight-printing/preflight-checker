@@ -116,7 +116,7 @@ export default function EditorCanvas({
   }, [gridSizePx, snapToGrid]);
 
   // Compute dynamic top/bottom paddings for layout and zoom calculations
-  const topPadding = pdfBoxInfo ? 46 : 40;
+  const topPadding = proposedTrimInsets ? 122 : pdfBoxInfo ? 46 : 40;
   let bottomPadding = 40;
   if (totalPages > 1) {
     bottomPadding = isPageSelectorExpanded ? 300 : 140;
@@ -319,8 +319,9 @@ export default function EditorCanvas({
              )}
 
              {/* 1. Trim Line / Cut Line Overlay (Anchored to Canvas) */}
-             {showSafeLine && (
+             {showSafeLine && !proposedTrimInsets && (
                 <div 
+                  role="img" aria-label={pdfBoxInfo?.hasDistinctTrimBox ? 'Confirmed trim guide' : 'Page boundary guide'}
                   style={{
                     position: 'absolute',
                     top: `${trimGuide.top}px`,
@@ -336,8 +337,9 @@ export default function EditorCanvas({
              )}
 
              {/* 2. Safe Area Dot Line (Anchored to Canvas) */}
-             {showSafeLine && (
+             {showSafeLine && !proposedTrimInsets && (
                 <div 
+                  role="img" aria-label="Safe area guide"
                   style={{
                     position: 'absolute',
                     top: `${safeGuide.top}px`,

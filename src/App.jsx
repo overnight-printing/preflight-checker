@@ -36,6 +36,7 @@ import {
   translatePositionForBleed
 } from './utils/layoutMath';
 import { getOutputGeometry, rotatedSize } from './utils/pdfGeometry';
+import { getReviewSize } from './utils/cropMarks';
 import { validateArtworkFile, MAX_PDF_BYTES } from './utils/fileValidation';
 import { normalizeProofId, proofIdForFilename } from './utils/proofId';
 import { DEFAULT_PRINT_REQUIREMENTS } from './utils/printSettings';
@@ -270,6 +271,11 @@ export default function App() {
 
   let geometryDetails = null;
   let geometryError = '';
+  let proposedTrim = null;
+  if (pdfBoxInfo?.pageNum === currentPage && cropMarkReview?.status === 'found' && !cropMarkReview.applied && cropMarkReview.insets) {
+    try { proposedTrim = getReviewSize(pdfBoxInfo.cropBox, pdfBoxInfo.rotation, cropMarkReview.insets); }
+    catch { /* Invalid drafts stay in the review panel until corrected. */ }
+  }
   if (pdfBoxInfo) {
     try {
       const { trimBox, outputBox } = getOutputGeometry(pdfBoxInfo, {
@@ -1384,8 +1390,8 @@ export default function App() {
               {geometryDetails && (
                 <div className="pdf-geometry-info-card" aria-label="Document size summary">
                   <div className="geometry-stat">
-                    <span>Trim Size</span>
-                    <strong>{geometryDetails.trimSize}</strong>
+                    <span>{proposedTrim ? `${cropMarkReview.detected ? 'Detected' : 'Proposed'} trim · unconfirmed` : 'Trim Size'}</span>
+                    <strong>{proposedTrim ? formatPtToInches(proposedTrim.width, proposedTrim.height) : geometryDetails.trimSize}</strong>
                   </div>
                   <div className="geometry-stat">
                     <span>Output Size</span>
@@ -1399,6 +1405,10 @@ export default function App() {
                     <span>Pages</span>
                     <strong>{geometryDetails.pages}</strong>
                   </div>
+                  {proposedTrim && <div className="geometry-trim-review" role="status">
+                    <span>Orange dashed line: proposed cut. Confirm to use this trim.</span>
+                    <button type="button" className="btn btn-secondary" disabled={controlsBusy} onClick={() => handlePreflightFix('reviewedTrim')}>Confirm trim</button>
+                  </div>}
                 </div>
               )}
 
@@ -1411,7 +1421,7 @@ export default function App() {
                 canvasScale={canvasScale}
                 pdfBoxInfo={pdfBoxInfo}
                 cropMarksEnabled={artworkType === 'pdf' && cropMarksEnabled}
-                proposedTrimInsets={cropMarkReview?.status !== 'dismissed' && !cropMarkReview?.applied ? cropMarkReview?.insets : null}
+                proposedTrimInsets={proposedTrim ? cropMarkReview.insets : null}
                 showSafeLine={showSafeLine}
                 safeZonePoints={safeZonePoints}
                 bleedEnabled={bleedEnabled} // Draw actual Magenta Trim Line

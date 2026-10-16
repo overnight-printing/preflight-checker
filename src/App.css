@@ -2224,6 +2224,21 @@ summary:focus-visible {
   white-space: nowrap;
 }
 
+.geometry-trim-review {
+  display: flex;
+  flex: 1 0 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 11px;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.geometry-trim-review .btn { flex-shrink: 0; min-height: 44px; }
+.pdf-geometry-info-card:has(.geometry-trim-review) { max-width: min(650px, calc(100% - 24px)); }
+
 @media (max-width: 600px) {
   .pdf-geometry-info-card,
   .pdf-geometry-info-card.expanded {
@@ -2303,7 +2318,7 @@ fieldset:disabled { opacity: 0.65; }
 .crop-mark-review { margin: 12px; }
 .crop-mark-review .quiet-button { margin-top: 8px; margin-right: 12px; }
 .trim-inset-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
-.trim-inset-fields input { width: 100%; min-width: 0; min-height: 36px; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-surface); color: var(--text-primary); }
+.crop-mark-review input { width: 100%; min-width: 0; min-height: 44px; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-surface); color: var(--text-primary); }
 .crop-mark-warning { margin: 12px; padding: 10px; border-left: 3px solid var(--warning); }
 .pdf-output-settings .select-field:first-child { margin-top: 0; }
 .print-readiness { display: grid; gap: 8px; padding: 12px; border-left: 3px solid var(--warning); background: var(--bg-card); font-size: 12px; }
