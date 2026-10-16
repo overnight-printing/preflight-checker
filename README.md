@@ -421,6 +421,18 @@ npm run dev
 - Check whether the PDF is encrypted, damaged, or unusually large.
 - Open the browser developer console for the underlying PDF.js error.
 
+### An app file fails to load after an update
+
+An older open tab can reference a PDF module removed by a newer deployment. If the app shows **Refresh app**, check your connection, download any existing work if possible, then refresh and reselect your artwork. Refreshing clears unsaved browser state. The app never refreshes automatically while artwork is loaded.
+
+Cloudflare Pages uses `public/_headers` to revalidate HTML and `public/404.html` to return a real 404 for missing modules instead of the app HTML. Other hosts should configure the same behavior. See [Vite's load-error guidance](https://vite.dev/guide/build.html#load-error-handling).
+
+Test the production-build recovery with a running `npm run preview` server:
+
+```bash
+PLAYWRIGHT_MODULE=/tmp/preflight-browser/node_modules/playwright node scripts/verify-module-recovery.cjs
+```
+
 ### The exported PDF looks flattened
 
 Check **PDF output**. **Preserve vectors and source colors** retains original PDF resources; **Last resort: flatten visible artwork (RGB)** deliberately produces page images. Use **Reset Artwork** if an older session or externally modified PDF was rasterized.

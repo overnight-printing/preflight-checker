@@ -34,3 +34,11 @@ The two customer PDFs named in the guardrails were unavailable at their document
 Inline-image end markers remain delimiter-based and trigger an incomplete-inspection warning. White-overprint detection covers direct device-color fills/strokes/text, not every pattern, ICC white or image-mask case. Custom stamp CMYK tints are unprofiled approximations, not press-profile conversions. RGB repair still loses vectors/ink separations on the explicitly repaired page and removes document output-profile/PDF-X promises.
 
 The separate MVP backlog was not implemented. Existing vector bleed and customer proof behavior were retained.
+
+## Deployment module recovery
+
+An older v2.0.11 tab requested `/assets/pdfProcessor-DmVe2dAC.js` after the live site moved to v2.0.12. That URL returned `200 text/html` (the SPA fallback); the current `/assets/pdfProcessor-WSIhg5MK.js` returned `200 application/javascript`.
+
+Added a persistent Vite preload-error banner with explicit refresh instructions, without automatic reload or changes to loaded artwork. Added HTML revalidation headers and a static 404 document to prevent missing modules from receiving SPA HTML on Cloudflare Pages.
+
+`npm run lint`, all 55 unit tests and `npm run build` passed. `verify-module-recovery.cjs` ran against the production preview with deliberately blocked PDF imports: upload failure showed recovery guidance, refresh/reselect loaded the PDF, and a later preflight-module failure retained the canvas and still allowed a real production download. `pdfinfo -box` confirmed 252 × 144 pt boxes; `pdfimages -list` showed no image resources. Inspected the recovery banner screenshot and `pdftoppm` output. Evidence is in `output/audit/module-recovery*`. PDF processing/output code was not changed by this recovery patch.

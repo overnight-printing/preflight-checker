@@ -168,6 +168,7 @@ export default function App() {
   const [isBugRendering, setIsBugRendering] = useState(false);
   const [isBugLoading, setIsBugLoading] = useState(false);
   const [notice, setNotice] = useState(null);
+  const [moduleLoadFailed, setModuleLoadFailed] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isGeneratingProof, setIsGeneratingProof] = useState(false);
@@ -197,6 +198,13 @@ export default function App() {
   const scanRequestIdRef = useRef(0);
   const bugRequestIdRef = useRef(0);
   const pdfPageCanvasCacheRef = useRef(new Map());
+
+  useEffect(() => {
+    // A deployment can remove chunks still referenced by an older open tab.
+    const handleModuleFailure = () => setModuleLoadFailed(true);
+    window.addEventListener('vite:preloadError', handleModuleFailure);
+    return () => window.removeEventListener('vite:preloadError', handleModuleFailure);
+  }, []);
   
   // Multi-page options
   const [multiPageOptions, setMultiPageOptions] = useState({
@@ -1299,7 +1307,13 @@ export default function App() {
         </div>
       </header>
 
-      {notice && (
+      {moduleLoadFailed && (
+        <div className="app-notice error" role="alert">
+          <span>A required app file could not load. This tab may be out of date or offline. Check your connection, then refresh and reselect your artwork. Refreshing clears unsaved edits; download your work first if possible.</span>
+          <button type="button" className="btn btn-secondary" onClick={() => window.location.reload()}>Refresh app</button>
+        </div>
+      )}
+      {notice && !moduleLoadFailed && (
         <div className={`app-notice ${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'}>
           <span>{notice.message}</span>
           <button type="button" aria-label="Dismiss message" onClick={() => setNotice(null)}><X size={18} /></button>

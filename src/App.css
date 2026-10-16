@@ -2254,7 +2254,8 @@ summary:focus-visible {
 .app-notice span { flex: 1; overflow-wrap: anywhere; }
 .app-notice.error { color: var(--danger); }
 .app-notice.success { color: var(--success); }
-.app-notice button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 6px; color: inherit; background: transparent; cursor: pointer; }
+.app-notice button:not(.btn) { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 6px; color: inherit; background: transparent; cursor: pointer; }
+.app-notice .btn { flex-shrink: 0; }
 .upload-error { display: flex; align-items: center; gap: 6px; }
 .export-area > .field-error { margin-bottom: 10px; }
 .draggable-bug, .bug-resize-handle { touch-action: none; }
