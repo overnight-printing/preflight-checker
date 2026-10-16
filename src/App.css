@@ -2300,6 +2300,11 @@ fieldset:disabled { opacity: 0.65; }
 .print-requirements .select-field { margin-top: 12px; display: grid; gap: 6px; font-size: 12px; }
 .print-requirements .field-help { margin-top: 10px; }
 .pdf-output-settings { margin: 12px; }
+.crop-mark-review { margin: 12px; }
+.crop-mark-review .quiet-button { margin-top: 8px; margin-right: 12px; }
+.trim-inset-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.trim-inset-fields input { width: 100%; min-width: 0; min-height: 36px; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-surface); color: var(--text-primary); }
+.crop-mark-warning { margin: 12px; padding: 10px; border-left: 3px solid var(--warning); }
 .pdf-output-settings .select-field:first-child { margin-top: 0; }
 .print-readiness { display: grid; gap: 8px; padding: 12px; border-left: 3px solid var(--warning); background: var(--bg-card); font-size: 12px; }
 .print-readiness.has-errors { border-left-color: var(--danger); }

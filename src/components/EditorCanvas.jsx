@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { CROP_MARK_MARGIN, getCropMarkLines } from '../utils/cropMarks.js';
 
 export default function EditorCanvas({
   artworkCanvas, // HTMLCanvasElement of the artwork
@@ -7,6 +8,8 @@ export default function EditorCanvas({
   bugImageSrc,   // DataURL of the tinted bug
   position,      // { left: px, top: px }
   size,          // { width: px, height: px }
+  cropMarksEnabled = false,
+  proposedTrimInsets = null,
   pdfBoxInfo = null, // Geometry box metadata (CropBox, TrimBox)
   canvasScale = 1.0,
   showSafeLine = true,
@@ -42,6 +45,9 @@ export default function EditorCanvas({
 
   const canvasWidth = artworkCanvas ? artworkCanvas.width : 0;
   const canvasHeight = artworkCanvas ? artworkCanvas.height : 0;
+  const markMarginPx = cropMarksEnabled ? CROP_MARK_MARGIN * canvasScale : 0;
+  const paperWidth = canvasWidth + 2 * markMarginPx;
+  const paperHeight = canvasHeight + 2 * markMarginPx;
 
   // REFACTORED GUIDE LINE LOGIC: 
   // Anchor everything to the CURRENT processed artwork canvas, not metadata.
@@ -128,8 +134,8 @@ export default function EditorCanvas({
     const visibleWidth = Math.max(1, containerWidth - 80);
     const visibleHeight = Math.max(1, containerHeight - topPadding - bottomPadding);
     
-    const zoomX = visibleWidth / artworkCanvas.width;
-    const zoomY = visibleHeight / artworkCanvas.height;
+    const zoomX = visibleWidth / paperWidth;
+    const zoomY = visibleHeight / paperHeight;
     
     const fitZoom = Math.min(1.0, zoomX, zoomY);
     // Large-format artwork can require a zoom below 10%. Keep enough precision
@@ -137,7 +143,7 @@ export default function EditorCanvas({
     const finalZoom = Math.max(0.01, Math.floor(fitZoom * 1000) / 1000);
     
     onZoomChange(finalZoom);
-  }, [artworkCanvas, bottomPadding, onZoomChange, topPadding]);
+  }, [artworkCanvas, bottomPadding, onZoomChange, topPadding, paperWidth, paperHeight]);
 
   useEffect(() => {
     if (!containerRef.current || !artworkFile || !artworkCanvas) return;
@@ -272,8 +278,8 @@ export default function EditorCanvas({
       >
         <div
           style={{
-            width: `${canvasWidth * zoom}px`,
-            height: `${canvasHeight * zoom}px`,
+            width: `${paperWidth * zoom}px`,
+            height: `${paperHeight * zoom}px`,
             position: 'relative',
             display: 'flex',
             justifyContent: 'center',
@@ -284,8 +290,9 @@ export default function EditorCanvas({
           <div 
             className="canvas-container"
             style={{
-              width: `${canvasWidth}px`,
-              height: `${canvasHeight}px`,
+              width: `${paperWidth}px`,
+              height: `${paperHeight}px`,
+              background: cropMarksEnabled ? '#ffffff' : undefined,
               position: 'absolute',
               transform: `scale(${zoom})`,
               transformOrigin: 'center center',
@@ -295,6 +302,11 @@ export default function EditorCanvas({
               maxHeight: 'none'
             }}
           >
+            {cropMarksEnabled && <svg aria-label="Crop marks preview" role="img" viewBox={`0 0 ${paperWidth / canvasScale} ${paperHeight / canvasScale}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+              {getCropMarkLines({ x: CROP_MARK_MARGIN + trimLeftPx / canvasScale, y: CROP_MARK_MARGIN + trimTopPx / canvasScale, width: trimWidthPx / canvasScale, height: trimHeightPx / canvasScale },
+                { x: CROP_MARK_MARGIN, y: CROP_MARK_MARGIN, width: canvasWidth / canvasScale, height: canvasHeight / canvasScale }).map((line, index) => <line key={index} {...line} stroke="#000000" strokeWidth="0.25" />)}
+            </svg>}
+            <div className="artwork-frame" style={{ position: 'absolute', left: markMarginPx, top: markMarginPx, width: canvasWidth, height: canvasHeight, overflow: 'hidden' }}>
             <div ref={canvasMountRef} className="artwork-canvas" style={{ pointerEvents: 'none' }} />
 
              {showGrid && (
@@ -339,6 +351,13 @@ export default function EditorCanvas({
                   }}
                 />
              )}
+
+             {proposedTrimInsets && <div role="img" aria-label="Suggested trim guide" style={{ position: 'absolute',
+               left: virtualBleedPx + (proposedTrimInsets.left - manualCropAmount - (trimCropEnabled ? pdfBoxInfo?.trimInsets.left || 0 : 0)) * canvasScale,
+               top: virtualBleedPx + (proposedTrimInsets.top - manualCropAmount - (trimCropEnabled ? pdfBoxInfo?.trimInsets.top || 0 : 0)) * canvasScale,
+               width: Math.max(0, ((pdfBoxInfo?.cropBox && (pdfBoxInfo.rotation % 180 === 0 ? pdfBoxInfo.cropBox.width : pdfBoxInfo.cropBox.height)) - proposedTrimInsets.left - proposedTrimInsets.right) * canvasScale),
+               height: Math.max(0, ((pdfBoxInfo?.cropBox && (pdfBoxInfo.rotation % 180 === 0 ? pdfBoxInfo.cropBox.height : pdfBoxInfo.cropBox.width)) - proposedTrimInsets.top - proposedTrimInsets.bottom) * canvasScale),
+               border: '2px dashed #d97706', pointerEvents: 'none', zIndex: 3, boxSizing: 'border-box' }} />}
 
              {/* 3. Interactive Crop Mode Overlay */}
              {isCropMode && (
@@ -391,6 +410,7 @@ export default function EditorCanvas({
                 />
               </div>
             )}
+            </div>
           </div>
         </div>
       </div>

@@ -14,6 +14,7 @@ import {
   drawObject,
   setGraphicsState,
   degrees,
+  cmyk,
   decodePDFRawStream
 } from 'pdf-lib';
 import { requiresRebuiltPdfOutput } from './pdfExportRouting';
@@ -22,6 +23,7 @@ import { createPDFPageEmbedder } from './pdfPageEmbedding';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { getPdfBytes, getPdfDocument } from './pdfSource.js';
 import { tintStampContent } from './pdfStampColor.js';
+import { getCropMarkLines } from './cropMarks.js';
 
 // Ship the matching worker with the app, including deployments under a base path.
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -386,12 +388,14 @@ export async function stitchBugToPDF(
   pageSizes = {},
   trimCropEnabled = false,
   manualCropAmount = 0,
-  isCropMode = false
+  isCropMode = false,
+  { cropMarksEnabled = false } = {}
 ) {
   const originalBytes = await getPdfBytes(originalPDFFile);
   const pdfDoc = await getPdfDocument(originalPDFFile, true);
 
-  if (!bugEnabled && !requiresRebuiltPdfOutput({ bleedAmount, trimCropEnabled, manualCropAmount, isCropMode })) return new Uint8Array(originalBytes);
+  const rebuild = requiresRebuiltPdfOutput({ bleedAmount, trimCropEnabled, manualCropAmount, isCropMode, cropMarksEnabled });
+  if (!bugEnabled && !rebuild) return new Uint8Array(originalBytes);
   const pages = pdfDoc.getPages();
   const pagesToStitch = targetPages ?? [currentPageIndex];
   if (bugEnabled && !bugFile) throw new Error('Load a Union Bug PDF before exporting.');
@@ -435,7 +439,7 @@ export async function stitchBugToPDF(
   // Option A: unchanged page geometry with an optional vector overlay.
   // Any requested trim/crop must use Option B so the output page boxes and
   // visible bounds are rebuilt around the selected trim boundary.
-  if (!requiresRebuiltPdfOutput({ bleedAmount, trimCropEnabled, manualCropAmount, isCropMode })) {
+  if (!rebuild) {
     if (bugEnabled) {
       for (const pageNum of pagesToStitch) {
         if (pageNum < 1 || pageNum > pages.length) continue;
@@ -459,15 +463,15 @@ export async function stitchBugToPDF(
     const pageNum = i + 1;
     const originalPage = pages[i];
 
-    const { sourceBox, trimBox, outputBox } = getOutputGeometry({
+    const { sourceBox, trimBox, outputBox, artworkBox, markMargin } = getOutputGeometry({
       cropBox: originalPage.getCropBox(),
       trimBox: originalPage.getTrimBox()
-    }, { trimCropEnabled, manualCropAmount, bleedAmount });
+    }, { trimCropEnabled, manualCropAmount, bleedAmount, cropMarksEnabled });
     const newPage = outputDoc.addPage([outputBox.width, outputBox.height]);
     newPage.setRotation(originalPage.getRotation());
     newPage.setMediaBox(0, 0, outputBox.width, outputBox.height);
     newPage.setCropBox(0, 0, outputBox.width, outputBox.height);
-    newPage.setBleedBox(0, 0, outputBox.width, outputBox.height);
+    newPage.setBleedBox(artworkBox.x, artworkBox.y, artworkBox.width, artworkBox.height);
     newPage.setTrimBox(trimBox.x, trimBox.y, trimBox.width, trimBox.height);
 
     // Structurally blank pages also need a content stream to be embedded.
@@ -480,19 +484,25 @@ export async function stitchBugToPDF(
       right: sourceBox.x + sourceBox.width,
       top: sourceBox.y + sourceBox.height
     });
+    newPage.pushOperators(pushGraphicsState(), concatTransformationMatrix(1, 0, 0, 1, markMargin, markMargin));
     drawVectorPDFPageWithMirrorBleed(newPage, embeddedOriginalPage, {
       x: 0, y: 0, width: sourceBox.width, height: sourceBox.height
     }, bleedAmount);
+    newPage.pushOperators(popGraphicsState());
+
+    if (cropMarksEnabled) for (const line of getCropMarkLines(trimBox, artworkBox)) {
+      newPage.drawLine({ start: { x: line.x1, y: line.y1 }, end: { x: line.x2, y: line.y2 }, thickness: 0.25, color: cmyk(0, 0, 0, 1) });
+    }
 
     // Overlay the vector Union Bug last so expanded bleed/crop output cannot cover it.
     if (bugEnabled && pagesToStitch.includes(pageNum)) {
       const activePos = pagePositions[pageNum] || position;
       const activeSize = pageSizes[pageNum] || bugSize;
-      const { angle, ...bugRect } = stampDrawOptions(activePos, activeSize, canvasScale, outputBox, originalPage.getRotation().angle);
+      const { angle, ...bugRect } = stampDrawOptions(activePos, activeSize, canvasScale, { ...artworkBox, x: 0, y: 0 }, originalPage.getRotation().angle);
 
       drawKnockoutStamp(newPage, await getEmbeddedBug(outputDoc, pageNum), {
-        x: bugRect.x,
-        y: bugRect.y,
+        x: bugRect.x + markMargin,
+        y: bugRect.y + markMargin,
         width: bugRect.width,
         height: bugRect.height,
         rotate: degrees(angle)

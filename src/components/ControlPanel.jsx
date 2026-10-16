@@ -66,6 +66,8 @@ export default function ControlPanel({
   onSafeZoneChange,
   bleedEnabled,
   sourceHasBleed = false,
+  cropMarksEnabled,
+  onCropMarksToggle,
   isPdf = true,
   imageDpi = 300,
   onImageDpiChange,
@@ -166,6 +168,11 @@ export default function ControlPanel({
             </div>
           </div>
         )}
+
+        {isPdf && <div className="setting-row">
+          <div className="setting-copy"><strong>Add crop marks</strong><span>Vector cut marks outside the bleed. Adds paper margin.</span></div>
+          <label className="switch"><input type="checkbox" aria-label="Add crop marks" checked={cropMarksEnabled} onChange={onCropMarksToggle} /><span className="slider-switch" /></label>
+        </div>}
 
         <div className="setting-row">
           <div className="setting-copy">

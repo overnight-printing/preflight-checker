@@ -453,7 +453,13 @@ The vector tinting routine targets common black RGB, grayscale, and CMYK operato
 
 ### The file contains crop marks
 
-Visual crop-mark detection is not currently available. Use the explicit TrimBox and manual inset, then verify output dimensions.
+For PDF pages without a distinct TrimBox, the app automatically looks for conventional dark corner marks after the preview loads, including marks baked into a flattened image PDF. It shows a proposed orange cut line, **Suggested trim (unconfirmed)** dimensions, and editable top/right/bottom/left insets. Check these against the artwork, then choose **Use this trim size**. This changes trim metadata only: the full original page, its artwork and its printed marks remain intact. **Reset Artwork** restores the upload.
+
+Existing distinct TrimBoxes remain authoritative. Missing, incomplete or ambiguous marks do not establish a trim size; use **Set trim manually** or **Detect again**. Detection targets axis-aligned dark marks near all four corners, and can miss unusual, faint or heavily compressed marks. Very large pages and custom UserUnit scaling require manual/prepress review. Detection results and edits are page-specific and are included in downloaded preflight reports. No bleed is inferred from the old mark margins; an explicit bleed box is retained only when it contains the confirmed trim and excludes the detected marks.
+
+In **Stamper Settings → Bleed & Trim**, enable **Add crop marks** to include new vector marks in PDF output, with or without mirror bleed. Marks align with the finished trim and use 0.25 pt K100 strokes, 18 pt long, with a 3 pt gap outside the artwork/bleed bounds. Each edge receives 21 pt of paper margin. MediaBox/CropBox include the marks; BleedBox excludes their margin; finished dimensions and stamp placement stay unchanged. The preview and production checks include this option; customer proofs exclude the new mark margin. It is off by default and resets on a new upload.
+
+Recognizing marks never enables cropping. Mirror bleed still reflects the current outer artwork edge. If the original printed marks remain, mirroring may repeat them; the app warns about this. **Crop to trim box** is a separate, explicit choice if you want to remove the original outer area before mirroring. Turning on new marks does not remove the old ones.
 
 ### The production build reports a large chunk warning
 
@@ -506,6 +512,7 @@ npm install --prefix /tmp/preflight-browser playwright
 PLAYWRIGHT_MODULE=/tmp/preflight-browser/node_modules/playwright node scripts/verify-browser.cjs
 python3 scripts/verify-pdf.py
 PLAYWRIGHT_MODULE=/tmp/preflight-browser/node_modules/playwright node scripts/verify-compatibility.cjs
+PLAYWRIGHT_MODULE=/tmp/preflight-browser/node_modules/playwright node scripts/verify-crop-marks.cjs
 ```
 
 Outputs, screenshots, and Poppler inspection files are saved under `output/audit/` (ignored by Git). Set `PREFLIGHT_BASE_URL` to change the development-server URL or `PREFLIGHT_AUDIT_OUTPUT` to change the output folder. The PDF verification script requires `pdfinfo`, `pdfimages`, and `pdftoppm`. Visually inspect the rendered PDFs after the automated checks.

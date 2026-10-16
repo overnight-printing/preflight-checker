@@ -1,3 +1,20 @@
+export const CROP_MARK_LENGTH = 18;
+export const CROP_MARK_GAP = 3;
+export const CROP_MARK_MARGIN = CROP_MARK_LENGTH + CROP_MARK_GAP;
+
+export function getCropMarkLines(trim, artwork) {
+  const lines = [];
+  for (const x of [trim.x, trim.x + trim.width]) {
+    lines.push({ x1: x, y1: artwork.y - CROP_MARK_GAP, x2: x, y2: artwork.y - CROP_MARK_MARGIN });
+    lines.push({ x1: x, y1: artwork.y + artwork.height + CROP_MARK_GAP, x2: x, y2: artwork.y + artwork.height + CROP_MARK_MARGIN });
+  }
+  for (const y of [trim.y, trim.y + trim.height]) {
+    lines.push({ x1: artwork.x - CROP_MARK_GAP, y1: y, x2: artwork.x - CROP_MARK_MARGIN, y2: y });
+    lines.push({ x1: artwork.x + artwork.width + CROP_MARK_GAP, y1: y, x2: artwork.x + artwork.width + CROP_MARK_MARGIN, y2: y });
+  }
+  return lines;
+}
+
 // PDF boxes stay in source coordinates; preview coordinates follow page rotation.
 export function rotatedSize(box, rotation = 0) {
   return rotation % 180 === 0
@@ -11,7 +28,7 @@ export function rotateInsets(insets, rotation = 0) {
   return Object.fromEntries(edges.map((edge, index) => [edge, insets[edges[(index - turns + 4) % 4]]]));
 }
 
-export function getOutputGeometry(boxInfo, { trimCropEnabled = false, manualCropAmount = 0, bleedAmount = 0 } = {}) {
+export function getOutputGeometry(boxInfo, { trimCropEnabled = false, manualCropAmount = 0, bleedAmount = 0, cropMarksEnabled = false } = {}) {
   if (![manualCropAmount, bleedAmount].every(value => Number.isFinite(value) && value >= 0)) {
     throw new Error('Crop and bleed amounts must be finite, non-negative numbers.');
   }
@@ -31,14 +48,16 @@ export function getOutputGeometry(boxInfo, { trimCropEnabled = false, manualCrop
   const right = Math.min(sourceBox.x + sourceBox.width, originalTrim.x + originalTrim.width);
   const top = Math.min(sourceBox.y + sourceBox.height, originalTrim.y + originalTrim.height);
   if (right <= left || top <= bottom) throw new Error('The crop does not contain any of the trim area.');
+  const markMargin = cropMarksEnabled ? CROP_MARK_MARGIN : 0;
   const trimBox = {
-    x: bleedAmount + left - sourceBox.x,
-    y: bleedAmount + bottom - sourceBox.y,
+    x: markMargin + bleedAmount + left - sourceBox.x,
+    y: markMargin + bleedAmount + bottom - sourceBox.y,
     width: right - left,
     height: top - bottom
   };
-  const outputBox = { x: 0, y: 0, width: sourceBox.width + 2 * bleedAmount, height: sourceBox.height + 2 * bleedAmount };
-  return { sourceBox, trimBox, outputBox };
+  const artworkBox = { x: markMargin, y: markMargin, width: sourceBox.width + 2 * bleedAmount, height: sourceBox.height + 2 * bleedAmount };
+  const outputBox = { x: 0, y: 0, width: artworkBox.width + 2 * markMargin, height: artworkBox.height + 2 * markMargin };
+  return { sourceBox, trimBox, outputBox, artworkBox, markMargin };
 }
 
 export function stampDrawOptions(position, size, scale, box, rotation = 0) {
