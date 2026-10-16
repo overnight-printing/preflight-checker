@@ -141,7 +141,7 @@ Use **Reset Artwork** at any time to return to the originally uploaded file.
 
 ### 3. Apply corrections carefully
 
-Select an available repair for the issue you want to address. **Remove Overprint**, **Remove First Blank Page**, and **Apply flattening repair (RGB)** create an updated in-memory PDF and rerun the scan. **Add Mirror Bleed** schedules the job's required bleed for export; use **Check production output** to verify it. **Save Production File** downloads the repaired PDF. Your original upload remains available through **Reset Artwork**.
+Select an available repair for the issue you want to address. **Set Boxes to Order**, confirmed **Review and Remove Blank Pages**, and the displayed-page **Apply flattening repair (RGB)** create an updated in-memory PDF and rerun the scan. Overprint issues require source-file review; intentional overprint is retained. **Add Mirror Bleed** schedules the job's required bleed for export; use **Check production output** to verify it. **Save Production File** downloads the repaired PDF. Your original upload remains available through **Reset Artwork**.
 
 Bleed, overprint and blank-page repairs preserve PDF resources. When findings include transparency, gradients, masks or optional layers, **Repair disappearing artwork** offers an explicit 300/600 DPI RGB repair. It bakes the saved visible artwork, updates the preview and removes those live effects from the working PDF. It also converts source vectors/text and press ink plates to pixels, so review its tradeoffs before applying. Missing fonts, low-resolution originals and unwanted spot inks need correction in the source application. The separate **PDF output → Flatten visible artwork (RGB)** option applies the same appearance fallback only when preparing output.
 
@@ -194,17 +194,17 @@ Click **Save Production File** for production artwork.
 
 | Check | What the tool evaluates | Result behavior |
 | --- | --- | --- |
-| Image Resolution | Estimates effective resolution of embedded raster images | Warns below the selected job DPI target (default 300) |
+| Image Resolution | Estimates effective resolution of embedded raster images | Errors below 150 DPI; warns below the selected job DPI target (default 300) |
 | Bleed Margin | Compares TrimBox and BleedBox geometry | Compares each edge against the selected job target (default 9 pt); no-bleed jobs are supported |
-| Overprint | Searches graphics-state dictionaries for enabled overprint flags | Offers overprint removal |
+| Overprint | Tracks painted fill/stroke overprint through graphics states and nested Forms | Intentional overprint is informational; painted white overprint is an error requiring source repair |
 | Font Embedding | Inspects referenced font descriptors for embedded font programs | Requires embedding or outlining in the source application |
-| Color Mode | Looks for RGB color spaces in page resources and images | Warns when RGB content is detected |
-| Page Size Match | Compares page dimensions with the first page | Warns when dimensions differ by more than 3 pt |
-| Transparency | Inspects transparency groups, opacity, and blend modes | Informational for general/PDF/X-4 workflows; an error for legacy PDF/X-1a |
+| Color Mode | Scans color operators, nested Forms, images, shadings and three-channel ICC resources | Reports RGB page numbers; warns, or errors for legacy PDF/X-1a |
+| Page Size Match | Compares finished dimensions with an explicit order size, or with page 1 when unspecified | Errors on order mismatches (0.5 pt tolerance); warns on inconsistent pages (3 pt) |
+| Transparency | Checks used opacity, blend modes and soft masks; an empty transparency group alone does not trigger a finding | Informational for general/PDF/X-4 workflows; an error for legacy PDF/X-1a |
 | Gradients & Shadings | Finds PDF shading dictionaries, including nested artwork | Explains printer/RIP rendering risks without treating valid gradients as defects |
 | Image Masks | Finds stencil and explicit image masks | Identifies opaque masked artwork, including white logos; offers compatibility export guidance for printer failures |
 | Spot Colors | Looks for Separation and DeviceN color spaces | Lists intended ink plates; requires color-managed source conversion for unwanted spots |
-| Blank Pages | Checks PDF.js painting operators, including paths and outlined artwork | Offers removal of the first flagged page while retaining at least one page |
+| Blank Pages | Checks PDF.js painting operators, including paths and outlined artwork | Confirms all flagged page numbers before removal; always retains at least one page |
 | Hidden Layers | Checks for optional-content configuration in the PDF catalog | Requests visibility review; removing the catalog alone is unsafe |
 | PDF Version | Reads the PDF header version | Checks the selected workflow; PDF/X-4 requires 1.6 or later |
 
@@ -218,9 +218,11 @@ Click **Save Production File** for production artwork.
 
 The default is **General commercial printing**, with editable targets of **300 DPI** and **0.125-inch bleed**. Open **Job requirements** to choose the actual resolution, required bleed (including none), or a PDF/X-4 / legacy PDF/X-1a job. Bleed and DPI are job-specific targets, not universal PDF/X requirements. Live transparency, spot inks, and optional layers can be intentional. Black overprint is not automatically an error, and blank pages can be intentional for binding or imposition.
 
+Choose **Finished order size** in Job requirements (preset or custom width/height in inches). With no explicit source TrimBox, a matching order-plus-bleed page offers **Set Boxes to Order**. Merely selecting a size never changes the PDF; review and apply the box repair explicitly. Existing TrimBoxes stay authoritative.
+
 **Analyze PDF** evaluates the current source. **Check production output** first prepares the exact crop/bleed/stamp path, then analyzes that output. Production results are invalidated when those settings change. **Download preflight report** saves the checked scope, requirements, and results as JSON. A production check does not flatten source annotations or form-field appearances; review the source warnings before geometry changes or proofing. Production reports retain that warning when rebuilt output omits source annotations/forms.
 
-Output ICC intents, saved layer configurations and references, and page transparency blending groups are retained during resource-preserving export and customer proofing. Default black/white stamps use DeviceGray, avoiding an unnecessary RGB black. Stamps use isolated, opaque knockout settings, so inherited source overprint, masks, blend modes, or opacity cannot hide them.
+Output ICC intents, saved layer configurations and references, and page transparency blending groups are retained during resource-preserving export and customer proofing. Default black/white stamp tints use CMYK operators (K100 black or zero-ink white), avoiding an unnecessary RGB black. Stamps use isolated, opaque knockout settings, so inherited source overprint, masks, blend modes, or opacity cannot hide them.
 
 PDF/X requires self-contained fonts and defined output conditions; minimum DPI and bleed depend on the job. See the [PDF Association PDF/X requirements](https://pdfa.org/pdfx-the-key-facts/) and [Ghent Workgroup commercial print guidance](https://gwg.org/commercial-print/). Selecting a PDF/X workflow here does not convert or certify a PDF/X file.
 
@@ -231,17 +233,17 @@ These checks are practical browser-side heuristics, not a replacement for a RIP,
 | Fix | Implementation | Important tradeoff |
 | --- | --- | --- |
 | Add Mirror Bleed | Schedules a mirrored extension matching the job's bleed requirement, retaining any larger configured extension | Mirrored edges may be visible on artwork with text or distinct edge details; verify production output before saving |
-| Remove Overprint | Disables `OP` and `op` graphics-state flags | Changes intentional overprint behavior as well as accidental overprint |
-| Remove Blank Pages | Deletes pages identified by the blank-page heuristic | Visually sparse or structurally unusual pages should be reviewed before removal |
+| Set Boxes to Order | Uses an explicitly selected order size when source bounds exactly match that size plus required bleed | Confirm the centered cut line and edge artwork first; existing TrimBoxes are never overridden |
+| Remove Blank Pages | Confirms and deletes all identified blank pages in one action | Review the listed page numbers for binding/imposition; annotated pages are retained |
 | Optional content layers | Normal output retains saved visibility configuration | Explicit compatibility output bakes saved display visibility; print visibility may differ |
 | Flatten visible artwork (RGB) | Renders each source page on white at the selected 300 or 600 DPI, before crop/bleed/vector stamping | Source text, vectors, CMYK and spot plates become RGB pixels; source output profiles are removed; annotations/forms are excluded; PDF.js does not simulate overprint |
-| Apply flattening repair (RGB) | Uses the same flattening engine to replace the working PDF and rerun preflight immediately | Same RGB tradeoffs; reports and filenames retain the repair mode/resolution, and omitted annotations/forms remain a warning after rescanning |
+| Apply flattening repair (RGB) | Flattens only the displayed page, retains other pages and their resources, and reruns preflight | Last resort: source text, vectors and ink plates on the selected page become RGB; navigate to each affected page before applying. Reports record each repaired page and DPI. Source press profiles/PDF-X declarations are removed; omitted annotations/forms remain a warning |
 
 Always inspect the downloaded file in a production PDF viewer before sending it to print.
 
 ### Printer compatibility output
 
-Use **PDF output → Flatten visible artwork (RGB)** when objects, masked logos, or gradients look correct in the preview but disappear on a printer. Choose **600 DPI** for fine artwork and text, or **300 DPI** for smaller files, then **Check production output** and **Save Production File**. The filename includes `_Compatibility_600dpi` or `_Compatibility_300dpi`; the production report records the mode and resolution. New uploads return to vector/color-preserving output.
+Use **PDF output → Last resort: flatten visible artwork (RGB)** when objects, masked logos, or gradients look correct in the preview but disappear on a printer. Choose **600 DPI** for fine artwork and text, or **300 DPI** for smaller files, then **Check production output** and **Save Production File**. The filename includes `_Compatibility_600dpi` or `_Compatibility_300dpi`; the production report records the mode and resolution. New uploads return to vector/color-preserving output.
 
 This operation bakes the source artwork into one opaque RGB page image. The original upload stays available, page boxes and rotation are retained, and added Union Bugs remain vector. Existing low-resolution artwork does not gain detail. Browser memory limits are 40 million pixels per page, 120 million pixels per document, and 16,384 pixels per canvas edge; the tool rejects oversized jobs and never silently lowers the selected DPI.
 
@@ -257,6 +259,8 @@ Dragging the stamp switches that page to a custom position.
 
 ### Size
 
+Upload a custom one-page stamp PDF in the Union Bug panel. The bundled default is fetched only when stamping is enabled. Set `VITE_DEFAULT_STAMP_URL` at build time to use a shop stamp URL, or set it to an empty string to require custom uploads.
+
 The scale range is calculated from the uploaded stamp's original width so that the final stamp remains approximately between `0.2"` and `2.0"` wide. The current physical dimensions are shown next to the scale percentage.
 
 ### Color
@@ -265,7 +269,7 @@ The scale range is calculated from the uploaded stamp's original width so that t
 - **Palette** extracts dominant colors from the artwork and offers up to five choices.
 - **Custom** accepts any browser color-picker value.
 
-For PDF export, including bleed and manual crop, the tool modifies supported black/grayscale vector color operators in the stamp PDF and embeds the result as vector artwork. Custom stamp PDFs with unusual color operators or complex structures may not tint completely.
+For PDF export, including bleed and manual crop, the tool modifies supported black/grayscale vector color operators in the stamp PDF and embeds the result as vector artwork. Custom stamp PDFs with unusual color operators or complex structures may not tint completely. Stamp tints use CMYK operators (black is K100); custom RGB picker colors use an unprofiled CMYK approximation, so exact press matching still needs the shop ICC profile.
 
 ## Bleed, Trim, Crop, and Safe Zone
 
@@ -279,7 +283,7 @@ All PDF dimensions use PDF points internally:
 ### Guide colors
 
 - Blue or magenta solid line: trim/cut boundary.
-- Cyan dashed line: safe zone, 9 pt inside the trim boundary.
+- Cyan dashed line: configurable safe zone inset (default 9 pt) inside the trim boundary.
 
 ### Processing paths
 
@@ -383,13 +387,13 @@ The application has no database or server-side upload endpoint. Uploaded file da
 - PDF preflight results are heuristic and may produce false positives or false negatives.
 - PDF.js and PDF editing engines load on demand. A first visit still needs access to the hosted app assets; there is no offline app cache.
 - Large or complex PDFs can consume significant browser memory and take longer to render.
-- Encrypted or malformed PDFs may fail to load.
+- Encrypted PDFs are rejected with instructions to upload an unencrypted copy; malformed PDFs may fail to load.
 - Image DPI cannot be inferred reliably without complete physical-size metadata.
 - Automatic crop-mark detection depends on rendered pixel patterns and may require manual adjustment.
 - Missing fonts and unwanted spot inks must be repaired in the source application. Crop, bleed, and stamping preserve PDF resources.
 - There is no vector font outlining or color-managed CMYK conversion. Those require source fonts and the printer’s output profile.
-- RGB and spot-color detection is not a complete ICC/color-management workflow.
-- PDF/X declarations and ICC output-intent headers are inspected, but full PDF/X conformance, ICC profile validity, font glyph coverage, white-overprint object analysis, separations, total ink coverage, and press rendering require a dedicated prepress engine.
+- RGB and spot-color detection is not a complete ICC/color-management workflow. Inline-image boundaries are heuristic; these pages receive an incomplete-inspection warning.
+- PDF/X declarations and ICC output-intent headers are inspected, but full PDF/X conformance, ICC profile validity, font glyph coverage, complex white-overprint cases (patterns, ICC whites and image masks), separations, total ink coverage, and press rendering require a dedicated prepress engine.
 - Browser rendering can differ from a commercial RIP.
 
 ## Troubleshooting
@@ -419,7 +423,7 @@ npm run dev
 
 ### The exported PDF looks flattened
 
-Check **PDF output**. **Preserve vectors and source colors** retains original PDF resources; **Flatten visible artwork (RGB)** deliberately produces page images. Use **Reset Artwork** if an older session or externally modified PDF was rasterized.
+Check **PDF output**. **Preserve vectors and source colors** retains original PDF resources; **Last resort: flatten visible artwork (RGB)** deliberately produces page images. Use **Reset Artwork** if an older session or externally modified PDF was rasterized.
 
 ### Objects, white logos, or gradients disappear on the printer
 
@@ -492,6 +496,6 @@ PLAYWRIGHT_MODULE=/tmp/preflight-browser/node_modules/playwright node scripts/ve
 
 Outputs, screenshots, and Poppler inspection files are saved under `output/audit/` (ignored by Git). Set `PREFLIGHT_BASE_URL` to change the development-server URL or `PREFLIGHT_AUDIT_OUTPUT` to change the output folder. The PDF verification script requires `pdfinfo`, `pdfimages`, and `pdftoppm`. Visually inspect the rendered PDFs after the automated checks.
 
-The compatibility regression checks gradients, nested transparency/soft masks, saved hidden-layer visibility, page boxes/rotation, multiple pages, requested image resolution, opaque RGB resources, vector stamping, production reports, and reset on upload. It also exercises direct preflight flattening, automatic rescanning, restore-original behavior, persistent annotation omission warnings and 5 mm job bleed repair. Its intentional page images are checked separately from the normal export's zero-raster-resource fixtures.
+The compatibility regression checks gradients, nested transparency/soft masks, saved hidden-layer visibility, page boxes/rotation, multiple pages, requested image resolution, opaque RGB resources, vector stamping, production reports, and reset on upload. It also exercises direct preflight flattening, automatic rescanning, restore-original behavior, persistent annotation omission warnings and 5 mm job bleed repair. The browser regression also verifies painted white overprint, RGB page numbers, nested Type0/ICCBased resources, order box repair, confirmation/cancellation of multi-page blank removal, and selective repair retaining untouched vector pages. Its intentional page images are checked separately from the normal export's zero-raster-resource fixtures.
 
 To verify decoder loading under the deployment base path, build with `GITHUB_ACTIONS=true`, start `GITHUB_ACTIONS=true npm run preview`, and set `PREFLIGHT_PRODUCTION_URL` to the preview URL when running `verify-compatibility.cjs`. Its UI checks then use the production build while utility checks still use the development server, and assert that the white CCITT stencil decoder loads successfully from the generated assets.

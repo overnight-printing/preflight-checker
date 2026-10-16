@@ -1,14 +1,19 @@
 import { PDFDocument, PDFName } from 'pdf-lib';
 import { AnnotationMode } from 'pdfjs-dist';
 import { getCompatibilityRenderSize } from './compatibilityGeometry.js';
+import { getPdfDocument } from './pdfSource.js';
 
 // Explicit appearance fallback for printer/RIP failures. Canvas rendering is
 // RGB and loses source text/vectors/spot plates; normal export never uses this.
-export async function createCompatibilityArtworkPdf(file, pdfjsDocument, dpi = 600) {
-  const source = await PDFDocument.load(await file.arrayBuffer());
+export async function createCompatibilityArtworkPdf(file, pdfjsDocument, dpi = 600, pageNums = null) {
+  const source = await getPdfDocument(file);
   const pages = source.getPages();
+  const selected = new Set(pageNums ?? pages.map((_, index) => index + 1));
+  if (!selected.size || [...selected].some(number => !Number.isInteger(number) || number < 1 || number > pages.length)) throw new Error('Choose valid pages to flatten.');
+  const partial = selected.size < pages.length;
   let totalPixels = 0;
-  for (const page of pages) {
+  for (const [index, page] of pages.entries()) {
+    if (!selected.has(index + 1)) continue;
     const unit = source.context.lookup(page.node.get(PDFName.of('UserUnit')))?.asNumber?.() || 1;
     const box = page.getCropBox();
     const size = getCompatibilityRenderSize({ width: box.width * unit, height: box.height * unit }, dpi);
@@ -16,8 +21,17 @@ export async function createCompatibilityArtworkPdf(file, pdfjsDocument, dpi = 6
   }
   if (totalPixels > 120_000_000) throw new Error('This document is too large to flatten in browser memory. Choose 300 DPI or use a desktop transparency flattener.');
 
-  const output = await PDFDocument.create();
+  const output = partial ? await getPdfDocument(file, true) : await PDFDocument.create();
+  if (partial) {
+    // Keep untouched pages/resources/layers together; RGB repair invalidates any
+    // source PDF/X declaration and output-profile promise for the whole file.
+    output.catalog.delete(PDFName.of('OutputIntents'));
+    output.catalog.delete(PDFName.of('Metadata'));
+    const info = output.context.lookup(output.context.trailerInfo.Info);
+    for (const key of ['GTS_PDFXVersion', 'GTS_PDFXConformance']) info?.delete(PDFName.of(key));
+  }
   for (const [index, page] of pages.entries()) {
+    if (!selected.has(index + 1)) continue;
     const renderedPage = await pdfjsDocument.getPage(index + 1);
     const viewport = renderedPage.getViewport({ scale: dpi / 72, rotation: 0 });
     const size = getCompatibilityRenderSize({ width: viewport.width * 72 / dpi, height: viewport.height * 72 / dpi }, dpi);
@@ -36,7 +50,13 @@ export async function createCompatibilityArtworkPdf(file, pdfjsDocument, dpi = 6
       if (!png) throw new Error('The browser could not encode the flattened artwork.');
       const image = await output.embedPng(await png.arrayBuffer());
       const media = page.getMediaBox(), crop = page.getCropBox(), bleed = page.getBleedBox(), trim = page.getTrimBox();
-      const target = output.addPage([media.width, media.height]);
+      const target = partial ? output.getPage(index) : output.addPage([media.width, media.height]);
+      if (partial) {
+        target.node.set(PDFName.of('Contents'), output.context.obj([]));
+        target.node.set(PDFName.of('Resources'), output.context.obj({}));
+        target.node.delete(PDFName.of('Group'));
+        target.node.delete(PDFName.of('Annots'));
+      }
       target.setMediaBox(media.x, media.y, media.width, media.height);
       target.setCropBox(crop.x, crop.y, crop.width, crop.height);
       target.setBleedBox(bleed.x, bleed.y, bleed.width, bleed.height);

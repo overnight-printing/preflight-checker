@@ -20,6 +20,8 @@ import { requiresRebuiltPdfOutput } from './pdfExportRouting';
 import { getOutputGeometry, rotateInsets, stampDrawOptions } from './pdfGeometry';
 import { createPDFPageEmbedder } from './pdfPageEmbedding';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { getPdfBytes, getPdfDocument } from './pdfSource.js';
+import { tintStampContent } from './pdfStampColor.js';
 
 // Ship the matching worker with the app, including deployments under a base path.
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -38,7 +40,9 @@ const pdfWasmUrl = new URL('./', new URL(pdfWasmAssets['../../node_modules/pdfjs
  * @returns {Promise<pdfjsLib.PDFDocumentProxy>}
  */
 export async function loadPDF(file) {
-  const arrayBuffer = await file.arrayBuffer();
+  // Validate encryption once and copy bytes before PDF.js transfers its buffer.
+  await getPdfDocument(file);
+  const arrayBuffer = (await getPdfBytes(file)).slice(0);
   const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer, wasmUrl: pdfWasmUrl, stopAtErrors: true });
   return await loadingTask.promise;
 }
@@ -50,16 +54,9 @@ export async function loadPDF(file) {
  * @param {number} pageNum - 1-based page number
  * @returns {Promise<{cropBox: object, trimBox: object, mediaBox: object, bleedBox: object}>}
  */
-const pdfMetadataCache = new WeakMap();
-
 export async function getPDFBoxInfo(file, pageNum) {
   try {
-    let documentPromise = pdfMetadataCache.get(file);
-    if (!documentPromise) {
-      documentPromise = file.arrayBuffer().then(bytes => PDFDocument.load(bytes));
-      pdfMetadataCache.set(file, documentPromise);
-    }
-    const pdfDoc = await documentPromise;
+    const pdfDoc = await getPdfDocument(file);
     const pages = pdfDoc.getPages();
     if (pageNum < 1 || pageNum > pages.length) return null;
     const page = pages[pageNum - 1];
@@ -117,36 +114,8 @@ export async function getPDFBoxInfo(file, pageNum) {
   }
 }
 
-/**
- * Converts a hex color code (e.g. '#a855f7') into PDF RGB decimal values ('0.659 0.333 0.969')
- *
- * @param {string} hex - The hex color code
- * @returns {string|null} Space-separated RGB values or null
- */
-function hexToPdfRgb(hex) {
-  if (hex === 'original' || !hex) return null;
-  const cleanHex = hex.replace('#', '');
-  if (cleanHex.length !== 6) return null;
-  const r = (parseInt(cleanHex.substring(0, 2), 16) / 255).toFixed(3);
-  const g = (parseInt(cleanHex.substring(2, 4), 16) / 255).toFixed(3);
-  const b = (parseInt(cleanHex.substring(4, 6), 16) / 255).toFixed(3);
-  return `${r} ${g} ${b}`;
-}
-
-/**
- * Traverses PDF content streams and replaces black/grayscale coloring commands with target RGB color.
- * Maintains 100% vector shape integrity.
- *
- * @param {PDFDocument} bugDoc - The loaded Union Bug PDF document
- * @param {string} targetColor - The hex target color
- */
 async function tintVectorPDF(bugDoc, targetColor) {
-  const pdfRgb = hexToPdfRgb(targetColor);
-  if (!pdfRgb) return; // Keep original black/grayscale
-  // Process black and white must not introduce registration-prone RGB mixes.
-  const fillColor = pdfRgb === '0.000 0.000 0.000' ? '0 g' : pdfRgb === '1.000 1.000 1.000' ? '1 g' : `${pdfRgb} rg`;
-  const strokeColor = pdfRgb === '0.000 0.000 0.000' ? '0 G' : pdfRgb === '1.000 1.000 1.000' ? '1 G' : `${pdfRgb} RG`;
-
+  if (!/^#[\da-f]{6}$/i.test(targetColor || '')) return;
   const pages = bugDoc.getPages();
   if (pages.length === 0) return;
   const page = pages[0];
@@ -159,16 +128,7 @@ async function tintVectorPDF(bugDoc, targetColor) {
       try {
         const decodedStream = decodePDFRawStream(stream);
         const decompressed = decodedStream.decode();
-        let text = Array.from(decompressed, byte => String.fromCharCode(byte)).join('');
-
-        // Replace black colors: RGB ('0 0 0 rg' / '0 0 0 RG'), Grayscale ('0 g' / '0 G'), and CMYK ('0 0 0 1 k' / '0 0 0 1 K')
-        // Supports decimals '0.0 0.0 0.0 rg' etc.
-        text = text.replace(/\b0(\.0+)?\s+0(\.0+)?\s+0(\.0+)?\s+rg\b/g, fillColor);
-        text = text.replace(/\b0(\.0+)?\s+0(\.0+)?\s+0(\.0+)?\s+RG\b/g, strokeColor);
-        text = text.replace(/\b0(\.0+)?\s+g\b/g, fillColor);
-        text = text.replace(/\b0(\.0+)?\s+G\b/g, strokeColor);
-        text = text.replace(/\b0(\.0+)?\s+0(\.0+)?\s+0(\.0+)?\s+1(\.0+)?\s+k\b/g, fillColor);
-        text = text.replace(/\b0(\.0+)?\s+0(\.0+)?\s+0(\.0+)?\s+1(\.0+)?\s+K\b/g, strokeColor);
+        const text = tintStampContent(Array.from(decompressed, byte => String.fromCharCode(byte)).join(''), targetColor);
 
         const newBytes = Uint8Array.from(text, character => character.charCodeAt(0));
         stream.contents = bugDoc.context.flateStream(newBytes).contents;
@@ -428,8 +388,8 @@ export async function stitchBugToPDF(
   manualCropAmount = 0,
   isCropMode = false
 ) {
-  const originalBytes = await originalPDFFile.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(originalBytes);
+  const originalBytes = await getPdfBytes(originalPDFFile);
+  const pdfDoc = await getPdfDocument(originalPDFFile, true);
 
   if (!bugEnabled && !requiresRebuiltPdfOutput({ bleedAmount, trimCropEnabled, manualCropAmount, isCropMode })) return new Uint8Array(originalBytes);
   const pages = pdfDoc.getPages();
@@ -438,7 +398,7 @@ export async function stitchBugToPDF(
   if (isCropMode) throw new Error('Visual cropping is unavailable. Use TrimBox cropping and manual inset.');
 
   // Reuse one vector stamp per color in each output document.
-  const bugBytes = bugEnabled && pagesToStitch.length > 0 ? await bugFile.arrayBuffer() : null;
+  const bugBytes = bugEnabled && pagesToStitch.length > 0 ? await getPdfBytes(bugFile) : null;
   const embeddedBugs = new WeakMap();
   const getEmbeddedBug = async (document, pageNum) => {
     let cache = embeddedBugs.get(document);

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PDFDocument, PDFName, PDFString } from 'pdf-lib';
-import { getPrintDocumentChecks, normalizePrintRequirements } from '../src/utils/printRequirements.js';
+import { PDFDocument, PDFName, PDFString, degrees } from 'pdf-lib';
+import { getPrintDocumentChecks, getOrderTrim, normalizePrintRequirements } from '../src/utils/printRequirements.js';
 
 test('job requirements are validated and do not equate PDF/X metadata with certification', async () => {
   assert.throws(() => normalizePrintRequirements({ minDpi: 0 }), /valid print/);
@@ -17,6 +17,22 @@ test('job requirements are validated and do not equate PDF/X metadata with certi
   const info = document.context.lookup(document.context.trailerInfo.Info);
   info.set(PDFName.of('GTS_PDFXVersion'), PDFString.of('PDF/X-4'));
   assert.equal(getPrintDocumentChecks(document, { workflow: 'pdfx4' }).pdfxStandard.status, 'info');
+});
+
+test('order trim requires an explicit order, matching bleed geometry, and no existing TrimBox', async () => {
+  const document = await PDFDocument.create();
+  const page = document.addPage([270, 162]);
+  const requirements = { orderSize: { width: 252, height: 144 }, bleedPoints: 9 };
+  assert.equal(getOrderTrim(page, {}), null);
+  assert.deepEqual(getOrderTrim(page, requirements).trim, { x: 9, y: 9, width: 252, height: 144 });
+  assert.equal(getOrderTrim(page, { ...requirements, bleedPoints: 12 }), null);
+  page.setTrimBox(0, 0, 270, 162);
+  assert.equal(getOrderTrim(page, requirements), null);
+  page.node.delete(PDFName.of('TrimBox'));
+  page.setRotation(degrees(90));
+  assert.equal(getOrderTrim(page, requirements), null);
+  assert.ok(getOrderTrim(page, { ...requirements, orderSize: { width: 144, height: 252 } }));
+  assert.throws(() => normalizePrintRequirements({ orderSize: { width: 0, height: 144 } }), /valid print/);
 });
 
 test('checks embedded ICC output profiles rather than accepting an OutputIntents key', async () => {

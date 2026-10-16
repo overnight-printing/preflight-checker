@@ -136,13 +136,14 @@ fs.mkdirSync(out, { recursive: true });
   fs.writeFileSync(out + "/composite.pdf", await composite.save());
   const overprint = await PDFDocument.create();
   const op = overprint.addPage([252, 144]);
-  op.drawRectangle({ width: 100, height: 100 });
   op.node
     .Resources()
     .set(
       PDFName.of("ExtGState"),
       overprint.context.obj({ GS1: { OP: true, op: true } }),
     );
+  op.pushOperators(setGraphicsState("GS1"));
+  op.drawRectangle({ width: 100, height: 100, color: cmyk(0, 0, 0, 1) });
   fs.writeFileSync(out + "/overprint.pdf", await overprint.save());
   const layers = await PDFDocument.load(fs.readFileSync(out + "/card.pdf"));
   const artworkLayer = layers.context.register(layers.context.obj({ Type: "OCG", Name: PDFString.of("Artwork") }));
@@ -188,6 +189,41 @@ fs.mkdirSync(out, { recursive: true });
   })));
   maskedPage.pushOperators(PDFOperator.of('q'), setGraphicsState(maskState), PDFOperator.of('Do', [maskedKey]), PDFOperator.of('Q'));
   fs.writeFileSync(out + '/masked-edge.pdf', await maskedEdge.save());
+  // Focused fixtures for the reported false results and destructive fixes.
+  const issueFiles = {};
+  const issue = async (name, streams, resources = {}, size = [252, 144]) => {
+    const doc = await PDFDocument.create();
+    for (const stream of streams) {
+      const page = doc.addPage(size);
+      page.node.set(PDFName.of('Resources'), doc.context.obj(resources));
+      page.node.set(PDFName.of('Contents'), doc.context.register(doc.context.flateStream(stream)));
+      page.node.set(PDFName.of('Group'), doc.context.obj({ S: 'Transparency' }));
+    }
+    issueFiles[name] = [...await doc.save()];
+    fs.writeFileSync(out + '/' + name + '.pdf', new Uint8Array(issueFiles[name]));
+    return doc;
+  };
+  const states = { ExtGState: { Over: { OP: true, op: true }, UnusedAlpha: { ca: 0.2 } } };
+  await issue('issue-black-overprint', ['/Over gs 0 0 0 1 k 0 0 100 100 re f'], states);
+  await issue('issue-white-overprint', ['/Over gs 0 0 0 0 k 0 0 100 100 re f', '/Over gs 1 G 0 0 m 100 100 l S', '/Over gs 1 1 1 rg 0 0 100 100 re f'], states);
+  await issue('issue-unused-group', ['0 0 0 1 k 0 0 100 100 re f'], states);
+  await issue('issue-rgb-pages', ['0 0 0 1 k 0 0 100 100 re f', '1 0 0 rg 0 0 100 100 re f']);
+  await issue('issue-strings', ['BT /F1 12 Tf (1 0 0 rg /Bogus Do) Tj ET'], { Font: { F1: { Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica' } } });
+  await issue('issue-blank-pages', ['0 0 0 1 k 0 0 100 100 re f', '', '', '0 0 0 1 k 0 0 m 100 100 l S']);
+  await issue('issue-order', ['0.1 0.8 0 0 k 0 0 270 162 re f'], {}, [270, 162]);
+  const formIssue = await PDFDocument.create();
+  const formIssuePage = formIssue.addPage([252, 144]);
+  const profile = formIssue.context.register(formIssue.context.flateStream(new Uint8Array(128), { N: 3, Alternate: 'DeviceRGB' }));
+  const inner = formIssue.context.register(formIssue.context.flateStream('1 g 0 0 100 100 re f', {
+    Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 100, 100],
+    Resources: { ColorSpace: { Profile: ['ICCBased', profile] }, Font: { F1: {
+      Type: 'Font', Subtype: 'Type0', BaseFont: 'EmbeddedNested', Encoding: 'Identity-H',
+      DescendantFonts: [{ Type: 'Font', Subtype: 'CIDFontType2', FontDescriptor: { FontFile2: formIssue.context.register(formIssue.context.flateStream('font')) } }],
+    }, F3: { Type: 'Font', Subtype: 'Type3' } } },
+  }));
+  formIssuePage.node.set(PDFName.of('Resources'), formIssue.context.obj({ ...states, XObject: { Inner: inner } }));
+  formIssuePage.node.set(PDFName.of('Contents'), formIssue.context.register(formIssue.context.flateStream('/Over gs /Inner Do')));
+  issueFiles['issue-nested'] = [...await formIssue.save()];
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 },
@@ -218,10 +254,11 @@ fs.mkdirSync(out, { recursive: true });
       Array.from(fs.readFileSync(out + "/" + name + ".pdf")),
     ]),
   );
+  Object.assign(files, issueFiles);
   try {
     const results = await page.evaluate(async (files) => {
       const processor = await import("/src/utils/pdfProcessor.js");
-      const { runPreflightChecks, fixBlankPage, fixOverprint } =
+      const { runPreflightChecks, fixBlankPage, fixOrderBoxes } =
         await import("/src/utils/preflightChecker.js");
       const { createCustomerProofPdf } =
         await import("/src/utils/customerProof.js");
@@ -244,14 +281,16 @@ fs.mkdirSync(out, { recursive: true });
         checks[name] = await runPreflightChecks(file, proxy);
         if (name === "card") checks.noBleedJob = await runPreflightChecks(file, proxy, { bleedPoints: 0 });
         if (name === "nested") checks.lowerDpiJob = await runPreflightChecks(file, proxy, { minDpi: 1 });
-        if (name === "overprint") {
-          const fixed = new File(
-            [await fixOverprint(await file.arrayBuffer())],
-            name + ".pdf",
-          );
-          const fixedDoc = await processor.loadPDF(fixed);
-          checks.fixedOverprint = await runPreflightChecks(fixed, fixedDoc);
-          await fixedDoc.destroy();
+        if (name.startsWith('issue-')) {
+          if (name === 'issue-order') {
+            checks.order = await runPreflightChecks(file, proxy, { orderSize: { width: 252, height: 144 } });
+            outputs['order-boxes'] = [...await fixOrderBoxes(file, { orderSize: { width: 252, height: 144 } })];
+          }
+          if (name === 'issue-blank-pages') {
+            outputs['removed-blanks'] = [...await fixBlankPage(await file.arrayBuffer(), checks[name].checks.blankPages.value)];
+          }
+          await proxy.destroy();
+          continue;
         }
         console.log("VERIFY scanned " + name);
         await proxy.destroy();
@@ -379,15 +418,31 @@ fs.mkdirSync(out, { recursive: true });
     }, files);
     for (const [name, bytes] of Object.entries(results.outputs))
       fs.writeFileSync(out + "/" + name + ".pdf", Buffer.from(bytes));
+    assert.equal(results.checks['issue-black-overprint'].checks.overprint.status, 'info');
+    assert.equal(results.checks['issue-white-overprint'].checks.overprint.status, 'error');
+    assert.deepEqual(results.checks['issue-white-overprint'].checks.overprint.pages, [1, 2, 3]);
+    assert.equal(results.checks['issue-white-overprint'].checks.overprint.fixable, false);
+    assert.equal(results.checks['issue-unused-group'].checks.transparency.status, 'pass');
+    assert.deepEqual(results.checks['issue-rgb-pages'].checks.colorMode.pages, [2]);
+    assert.equal(results.checks['issue-strings'].checks.colorMode.status, 'pass');
+    assert.deepEqual(results.checks['issue-blank-pages'].checks.blankPages.value, [2, 3]);
+    assert.equal(results.checks['issue-nested'].checks.fontEmbedding.status, 'pass');
+    assert.equal(results.checks['issue-nested'].checks.overprint.status, 'error');
+    assert.deepEqual(results.checks['issue-nested'].checks.colorMode.pages, [1]);
+    assert.equal(results.checks.order.checks.pageSize.status, 'pass');
+    assert.equal(results.checks.order.checks.bleed.status, 'pass');
+    assert.deepEqual(results.checks.order.checks.orderBoxes.value, [1]);
+    const orderOutput = await PDFDocument.load(new Uint8Array(results.outputs['order-boxes']));
+    assert.deepEqual(orderOutput.getPage(0).getTrimBox(), { x: 9, y: 9, width: 252, height: 144 });
+    assert.equal((await PDFDocument.load(new Uint8Array(results.outputs['removed-blanks']))).getPageCount(), 2);
     assert.equal(results.checks.card.checks.blankPages.status, "pass");
-    assert.equal(results.checks.nested.checks.resolution.status, "warning");
+    assert.equal(results.checks.nested.checks.resolution.status, "error");
     assert.equal(results.checks.nested.checks.colorMode.status, "warning");
     assert.equal(results.checks.composite.checks.fontEmbedding.status, "pass");
-    assert.equal(results.checks.overprint.checks.overprint.status, "warning");
-    assert.equal(results.checks.fixedOverprint.checks.overprint.status, "pass");
+    assert.equal(results.checks.overprint.checks.overprint.status, "info");
     assert.equal(results.checks.asymmetric.checks.bleed.status, "error");
     assert.equal(results.checks.noBleedJob.checks.bleed.status, "pass");
-    assert.equal(results.checks.lowerDpiJob.checks.resolution.status, "pass");
+    assert.equal(results.checks.lowerDpiJob.checks.resolution.status, "error");
     assert.equal(results.lastPageGuard, true);
     for (const state of Object.values(results.layerVisibility)) {
       assert.equal(state.hiddenVisible, false);
@@ -631,6 +686,32 @@ fs.mkdirSync(out, { recursive: true });
         "no horizontal overflow: " + name,
       );
     }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator('input[type=file]').first().setInputFiles(out + '/issue-order.pdf');
+    await page.locator('.artwork-canvas canvas').waitFor();
+    await page.getByRole('button', { name: 'Preflight', exact: true }).click();
+    await page.getByText('Job requirements', { exact: true }).click();
+    await page.getByLabel('Finished order size', { exact: true }).selectOption('card');
+    await page.getByRole('button', { name: 'Analyze PDF', exact: true }).click();
+    await page.getByRole('button', { name: 'Set Boxes to Order', exact: true }).click();
+    await page.getByText('Explicit finished TrimBoxes and page boundaries are consistent.', { exact: true }).waitFor();
+    const orderDownload = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save Production File', exact: true }).click();
+    await (await orderDownload).saveAs(out + '/ui-order-boxes.pdf');
+    await page.locator('input[type=file]').first().setInputFiles(out + '/issue-blank-pages.pdf');
+    await page.locator('.artwork-canvas canvas').waitFor();
+    await page.getByRole('button', { name: 'Analyze PDF', exact: true }).click();
+    const remove = page.getByRole('button', { name: 'Review and Remove Blank Pages', exact: true });
+    page.once('dialog', async dialog => { assert.ok(dialog.message().includes('2, 3')); await dialog.dismiss(); });
+    await remove.click();
+    await remove.waitFor();
+    page.once('dialog', async dialog => { assert.ok(dialog.message().includes('2, 3')); await dialog.accept(); });
+    await remove.click();
+    await page.getByText('No blank pages detected', { exact: true }).waitFor();
+    const blankDownload = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save Production File', exact: true }).click();
+    await (await blankDownload).saveAs(out + '/ui-removed-blanks.pdf');
+    assert.equal((await PDFDocument.load(fs.readFileSync(out + '/ui-removed-blanks.pdf'))).getPageCount(), 2);
     assert.deepEqual(errors, []);
     console.log(
       JSON.stringify(

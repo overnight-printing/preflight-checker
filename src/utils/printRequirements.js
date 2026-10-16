@@ -81,3 +81,18 @@ export function getPrintDocumentChecks(document, requirements = {}) {
   };
   return checks;
 }
+
+export function getOrderTrim(page, requirements) {
+  const { orderSize, bleedPoints } = normalizePrintRequirements(requirements);
+  if (!orderSize || page.node.has(PDFName.of('TrimBox')) || (page.node.get(PDFName.of('UserUnit'))?.asNumber?.() || 1) !== 1) return null;
+  const rotated = Math.abs(page.getRotation().angle % 180) === 90;
+  const width = rotated ? orderSize.height : orderSize.width;
+  const height = rotated ? orderSize.width : orderSize.height;
+  const crop = page.getCropBox();
+  for (const bleed of [crop, page.getMediaBox()]) {
+    if (Math.abs(bleed.width - width - 2 * bleedPoints) > 0.5 || Math.abs(bleed.height - height - 2 * bleedPoints) > 0.5) continue;
+    const trim = { x: bleed.x + (bleed.width - width) / 2, y: bleed.y + (bleed.height - height) / 2, width, height };
+    if (trim.x >= crop.x - 0.1 && trim.y >= crop.y - 0.1 && trim.x + width <= crop.x + crop.width + 0.1 && trim.y + height <= crop.y + crop.height + 0.1) return { trim, bleed };
+  }
+  return null;
+}

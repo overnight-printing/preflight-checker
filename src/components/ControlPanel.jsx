@@ -61,6 +61,8 @@ export default function ControlPanel({
   minScale = 10,
   maxScale = 300,
   showSafeLine,
+  safeZonePoints,
+  onSafeZoneChange,
   bleedEnabled,
   sourceHasBleed = false,
   isPdf = true,
@@ -236,6 +238,12 @@ export default function ControlPanel({
             <span className="slider-switch" />
           </label>
         </div>
+        <label className="select-field">Safe zone inset (inches)
+          <input aria-label="Safe zone inset in inches" type="number" min="0" step="0.025" value={Number((safeZonePoints / 72).toFixed(4))} onChange={event => {
+            const value = Number(event.target.value);
+            if (Number.isFinite(value) && value >= 0) onSafeZoneChange(value * 72);
+          }} />
+        </label>
       </WorkflowSection>
 
       <WorkflowSection

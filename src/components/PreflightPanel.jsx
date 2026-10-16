@@ -10,6 +10,7 @@ import {
 
 
 export default function PreflightPanel({
+  currentPage,
   results,
   isScanning,
   onRunFullCheck,
@@ -26,9 +27,32 @@ export default function PreflightPanel({
   bleedAmount = 0
 }) {
   const [requirementsOpen, setRequirementsOpen] = useState(false);
+  const orderSizes = { card: [252, 144], postcard: [432, 288], letter: [612, 792] };
+  const orderPreset = !requirements.orderSize ? 'none' : Object.keys(orderSizes).find(key => orderSizes[key][0] === requirements.orderSize.width && orderSizes[key][1] === requirements.orderSize.height) || 'custom';
   const requirementsPanel = (
     <details className="print-requirements" open={requirementsOpen} onToggle={event => setRequirementsOpen(event.currentTarget.open)}>
       <summary>Job requirements</summary>
+      <label className="select-field">Finished order size
+        <select aria-label="Finished order size" value={orderPreset} onChange={event => {
+          const preset = event.target.value;
+          const size = preset === 'custom' ? [72, 72] : orderSizes[preset];
+          onRequirementsChange({ ...requirements, orderSize: size ? { width: size[0], height: size[1] } : null });
+        }}>
+          <option value="none">Not specified — compare pages</option>
+          <option value="card">Business card — 3.5 × 2 in</option>
+          <option value="postcard">Postcard — 6 × 4 in</option>
+          <option value="letter">Letter — 8.5 × 11 in</option>
+          <option value="custom">Custom size</option>
+        </select>
+      </label>
+      {requirements.orderSize && ['width', 'height'].map(key => (
+        <label className="select-field" key={key}>Order {key} (inches)
+          <input aria-label={`Order ${key} in inches`} type="number" min="0.01" step="0.01" value={Number(((requirements.orderSize?.[key] || 0) / 72).toFixed(4))} onChange={event => {
+            const value = Number(event.target.value);
+            if (Number.isFinite(value) && value > 0) onRequirementsChange({ ...requirements, orderSize: { ...requirements.orderSize, [key]: value * 72 } });
+          }} />
+        </label>
+      ))}
       <label className="select-field">Print workflow
         <select aria-label="Print workflow" value={requirements.workflow} onChange={event => onRequirementsChange({ ...requirements, workflow: event.target.value })}>
           <option value="general">General commercial printing</option>
@@ -107,7 +131,7 @@ export default function PreflightPanel({
           {requirementsPanel}
           <span className="section-title">Full Preflight</span>
           <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
-            Find print issues and apply available repairs for bleed, overprint, blank pages, and troublesome transparency, gradients or masks. Save Production File downloads the repaired PDF.
+            Find print issues and apply available repairs for bleed, finished boxes and blank pages. Last-resort RGB flattening is available for printer rendering failures. Save Production File downloads the repaired PDF.
           </p>
           <button
             className="btn btn-primary btn-action-block"
@@ -152,8 +176,8 @@ export default function PreflightPanel({
   const getFixButtonText = (key) => {
     switch(key) {
       case 'bleed': return 'Add Mirror Bleed';
-      case 'overprint': return 'Remove Overprint';
-      case 'blankPages': return 'Remove First Blank Page';
+      case 'orderBoxes': return 'Set Boxes to Order';
+      case 'blankPages': return 'Review and Remove Blank Pages';
       default: return 'Apply Repair';
     }
   };
@@ -218,8 +242,8 @@ export default function PreflightPanel({
 
       {results.scope !== 'production' && ['transparency', 'gradients', 'imageMasks', 'hiddenLayers'].some(key => results.checks[key] && results.checks[key].status !== 'pass') && (
         <div className="print-requirements">
-          <strong>Repair disappearing artwork</strong>
-          <p className="field-help">If the preview looks right but objects, masks or gradients disappear in print, rebuild the working PDF as opaque artwork using the saved visible layers. The preview and preflight checks update after applying the repair.</p>
+          <strong>Last resort: repair disappearing artwork</strong>
+          <p className="field-help">Repairs only the displayed page ({currentPage}). Navigate to each affected page before applying. If objects, masks or gradients disappear in print, this bakes the saved visible artwork into an opaque image. The preview and preflight checks update after applying the repair.</p>
           <label className="select-field">Repair resolution
             <select aria-label="Repair resolution" value={compatibilityDpi} onChange={event => onCompatibilityDpiChange(Number(event.target.value))}>
               <option value={600}>600 DPI — fine artwork and text</option>
@@ -335,6 +359,8 @@ function getCheckTitle(key) {
     case 'pdfxStandard': return 'PDF/X Declaration';
     case 'interactiveContent': return 'Annotations & Forms';
     case 'pageUnits': return 'Physical Page Units';
+    case 'orderBoxes': return 'Order Trim & Bleed Boxes';
+    case 'contentScan': return 'Content Inspection';
     default: return key;
   }
 }

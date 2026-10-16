@@ -10,6 +10,7 @@ export default function EditorCanvas({
   pdfBoxInfo = null, // Geometry box metadata (CropBox, TrimBox)
   canvasScale = 1.0,
   showSafeLine = true,
+  safeZonePoints = 9,
   bleedEnabled = false, // Added bleedEnabled to draw the actual Trim Line (Magenta)
   bleedAmount = 9.0,    // Added mirror bleed in PDF points
   trimCropEnabled = false,
@@ -74,8 +75,7 @@ export default function EditorCanvas({
   const trimWidthPx = Math.max(0, canvasWidth - (virtualBleedPx * 2) - cropLeftPx - cropRightPx);
   const trimHeightPx = Math.max(0, canvasHeight - (virtualBleedPx * 2) - cropTopPx - cropBottomPx);
 
-  // The Safe Zone (Cyan) is ALWAYS 9pt (0.125") inside the Trim Line.
-  const safeInsetPx = 9.0 * canvasScale;
+  const safeInsetPx = safeZonePoints * canvasScale;
   const safeLeftPx = trimLeftPx + safeInsetPx;
   const safeTopPx = trimTopPx + safeInsetPx;
   const safeWidthPx = Math.max(0, trimWidthPx - (safeInsetPx * 2));

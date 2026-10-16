@@ -111,6 +111,29 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
       fs.writeFileSync(`${out}/${name}-${dpi}dpi-checks.json`, JSON.stringify({ before: result.before, after: result.after, differences: result.differences }, null, 2));
     }
 
+    // A repair may flatten only the displayed page; untouched pages stay vector.
+    const partialInput = [...fs.readFileSync(out + '/multi.pdf')];
+    const partialBytes = await browserPage.evaluate(async input => {
+      const { loadPDF } = await import('/src/utils/pdfProcessor.js');
+      const { createCompatibilityArtworkPdf } = await import('/src/utils/compatibilityPdf.js');
+      const file = new File([new Uint8Array(input)], 'partial.pdf');
+      const doc = await loadPDF(file);
+      try { return [...await createCompatibilityArtworkPdf(file, doc, 300, [1])]; }
+      finally { await doc.destroy(); }
+    }, partialInput);
+    fs.writeFileSync(out + '/partial-repair.pdf', new Uint8Array(partialBytes));
+    const partialDoc = await PDFDocument.load(new Uint8Array(partialBytes));
+    const originalMulti = await PDFDocument.load(new Uint8Array(partialInput));
+    const secondContents = doc => {
+      const contents = doc.context.lookup(doc.getPage(1).node.get(PDFName.of('Contents')));
+      return contents.asArray().map(ref => [...doc.context.lookup(ref).contents]);
+    };
+    assert.deepEqual(secondContents(partialDoc), secondContents(originalMulti));
+    const partialImages = execFileSync('pdfimages', ['-list', out + '/partial-repair.pdf'], { encoding: 'utf8' }).trim().split('\n').slice(2);
+    assert.equal(partialImages.length, 1);
+    assert.equal(Number(partialImages[0].trim().split(/\s+/)[0]), 1);
+    execFileSync('pdftoppm', ['-scale-to', '1100', '-png', out + '/partial-repair.pdf', out + '/partial-repair']);
+
     // Optional deployment smoke test: the real UI must find decoder assets
     // under the hosting base path as well as in the development server.
     const decoderRequests = [];

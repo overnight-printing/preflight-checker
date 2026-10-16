@@ -14,7 +14,8 @@ const getPDFBoxInfo = async (...args) => (await import('./utils/pdfProcessor')).
 const processUnionBug = async (...args) => (await import('./utils/pdfProcessor')).processUnionBug(...args);
 const stitchBugToPDF = async (...args) => (await import('./utils/pdfProcessor')).stitchBugToPDF(...args);
 const runPreflightChecks = async (...args) => (await import('./utils/preflightChecker')).runPreflightChecks(...args);
-const fixOverprint = async (...args) => (await import('./utils/preflightChecker')).fixOverprint(...args);
+const fixOrderBoxes = async (...args) => (await import('./utils/preflightChecker')).fixOrderBoxes(...args);
+const getPdfBytes = async (...args) => (await import('./utils/pdfSource')).getPdfBytes(...args);
 const fixBlankPage = async (...args) => (await import('./utils/preflightChecker')).fixBlankPage(...args);
 const createCustomerProofPdf = async (...args) => (await import('./utils/customerProof')).createCustomerProofPdf(...args);
 const createPngProofSourcePdf = async (...args) => (await import('./utils/customerProof')).createPngProofSourcePdf(...args);
@@ -132,6 +133,7 @@ export default function App() {
   }
 
   const [showSafeLine, setShowSafeLine] = useState(true);
+  const [safeZonePoints, setSafeZonePoints] = useState(9);
   const [showGrid, setShowGrid] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [gridSize, setGridSize] = useState(0.125); // Inches
@@ -208,7 +210,6 @@ export default function App() {
   // Collapsible page thumbnails strip state
   const [isThumbnailsExpanded, setIsThumbnailsExpanded] = useState(false);
 
-  // Safe zone is ALWAYS 9pt (0.125") inside the trim/cut line — hardcoded, not adjustable
   const pdfHasIncludedBleed = artworkType === 'pdf' && Boolean(pdfBoxInfo?.hasDistinctBleedBox);
   const effectiveBleedAmount = bleedEnabled ? bleedAmount : 0;
 
@@ -298,14 +299,16 @@ export default function App() {
 
   const hasArtwork = Boolean(artworkFile);
 
-  // Auto-load default Union Bug from public directory on mount
+  // Load the configured default only when the operator enables stamping.
   useEffect(() => {
-    if (!hasArtwork || bugFile || bugRequestIdRef.current !== 0) return;
+    if (!hasArtwork || !bugEnabled || bugFile || bugRequestIdRef.current !== 0) return;
     let active = true;
     const requestId = bugRequestIdRef.current;
     const loadDefaultBug = async () => {
       try {
-        const response = await fetch(`${import.meta.env.BASE_URL}union-bug-black.pdf`);
+        const stampUrl = import.meta.env.VITE_DEFAULT_STAMP_URL ?? `${import.meta.env.BASE_URL}union-bug-black.pdf`;
+        if (!stampUrl) return;
+        const response = await fetch(stampUrl);
         if (!response.ok) throw new Error('Default union bug not found');
         const blob = await response.blob();
         const file = new File([blob], 'union-bug-black.pdf', { type: 'application/pdf' });
@@ -329,7 +332,7 @@ export default function App() {
     
     loadDefaultBug();
     return () => { active = false; };
-  }, [hasArtwork, bugFile]);
+  }, [hasArtwork, bugEnabled, bugFile]);
 
   useEffect(() => {
     return () => { pdfDoc?.destroy(); };
@@ -796,12 +799,17 @@ export default function App() {
   // Handler for Preflight Auto-Fixes
   const handlePreflightFix = async (checkKey) => {
     if (!artworkFile || isBusy || isScanning) return;
+    const pagesToRemove = checkKey === 'blankPages' ? preflightResults?.checks?.blankPages?.value || [] : [];
+    if (checkKey === 'blankPages') {
+      if (!pagesToRemove.length) return;
+      if (pagesToRemove.length >= totalPages) { setNotice({ type: 'error', message: 'At least one page must remain. Remove pages individually in a PDF editor.' }); return; }
+      if (!window.confirm(`Remove blank pages ${pagesToRemove.join(', ')}? Confirm these pages are not needed for binding or imposition. Reset Artwork can restore the original upload.`)) return;
+    }
     const requestId = artworkLoadRequestIdRef.current;
     setIsLoading(true);
     try {
       let updatedBytes = null;
       let repair = artworkRepair;
-      let pageToRemove;
 
       if (checkKey === 'bleed') {
         // Add the job's requested bleed without moving a custom stamp on trim.
@@ -812,19 +820,20 @@ export default function App() {
         setNotice({ type: 'success', message: `Mirror bleed set to ${(amount / 72).toFixed(3)}" on each edge. Check production output, then Save Production File to download the repaired PDF.` });
         return;
       } else if (checkKey === 'flattenArtwork') {
-        updatedBytes = await createCompatibilityArtworkPdf(artworkFile, pdfDoc, compatibilityDpi);
+        updatedBytes = await createCompatibilityArtworkPdf(artworkFile, pdfDoc, compatibilityDpi, [currentPage]);
         repair = {
           type: 'flattenVisibleArtwork', dpi: compatibilityDpi, colorSpace: 'RGB',
+          pageDpi: { ...artworkRepair?.pageDpi, [currentPage]: compatibilityDpi },
           omittedInteractiveContent: Boolean(artworkRepair?.omittedInteractiveContent || pdfBoxInfo?.hasSourceAnnotations || pdfBoxInfo?.hasSourceForms)
         };
-      } else if (checkKey === 'overprint') {
-        updatedBytes = await fixOverprint(await artworkFile.arrayBuffer());
+      } else if (checkKey === 'orderBoxes') {
+        updatedBytes = await fixOrderBoxes(artworkFile, printRequirements);
 
       } else if (checkKey === 'blankPages') {
-        const blankPages = preflightResults?.checks?.blankPages?.value || [];
-        if (blankPages.length === 0) return;
-        pageToRemove = blankPages[0];
-        updatedBytes = await fixBlankPage(await artworkFile.arrayBuffer(), pageToRemove);
+        updatedBytes = await fixBlankPage(await getPdfBytes(artworkFile), pagesToRemove);
+        if (repair) repair = { ...repair, pageDpi: Object.fromEntries(Object.entries(repair.pageDpi)
+          .filter(([page]) => !pagesToRemove.includes(Number(page)))
+          .map(([page, dpi]) => [Number(page) - pagesToRemove.filter(number => number < Number(page)).length, dpi])) };
       }
 
       if (updatedBytes) {
@@ -834,17 +843,17 @@ export default function App() {
         // Re-load corrected PDF
         const doc = await loadPDF(correctedFile);
         if (requestId !== artworkLoadRequestIdRef.current) { await doc.destroy(); return; }
-        if (pageToRemove) {
+        if (pagesToRemove.length) {
           setPagePositions({});
           setPageSizes({});
           setPageAlignments({});
           setHasDoneInitialAlignment(false);
-          if (currentPage >= pageToRemove && currentPage > 1) setCurrentPage(prev => prev - 1);
+          setCurrentPage(Math.min(doc.numPages, Math.max(1, currentPage - pagesToRemove.filter(number => number < currentPage).length)));
         }
         if (checkKey === 'flattenArtwork') {
-          setArtworkRepair(repair);
           setPdfOutputMode('preserve'); // The working artwork is already flattened.
         }
+        setArtworkRepair(repair);
         renderRequestIdRef.current += 1;
         pdfPageCanvasCacheRef.current.clear();
         setPdfBoxInfo(null);
@@ -854,7 +863,7 @@ export default function App() {
         setPdfDoc(doc);
         setTotalPages(doc.numPages);
         setNotice({ type: 'success', message: checkKey === 'flattenArtwork'
-          ? `Flattening repair applied at ${compatibilityDpi} DPI in RGB. Review the updated preview, then Save Production File. Reset Artwork restores the original.`
+          ? `Flattening repair applied at ${compatibilityDpi} DPI in RGB. Repaired page: ${currentPage}. Review the updated preview, then Save Production File. Reset Artwork restores the original.`
           : 'Repair applied. Review the updated checks, then Save Production File. Reset Artwork restores the original.' });
 
         // Re-run preflight scan to update the UI status
@@ -889,7 +898,7 @@ export default function App() {
         }
       : { left: 0, right: 0, top: 0, bottom: 0 };
     const cropInsets = isCropMode ? manualCropGuides : metadataInsets;
-    const safeInsetPx = 9.0 * canvasScale;
+    const safeInsetPx = safeZonePoints * canvasScale;
     const safeLeftPx = virtualBleedPx + cropInsets.left + safeInsetPx;
     const safeTopPx = virtualBleedPx + cropInsets.top + safeInsetPx;
     const safeWidthPx = Math.max(
@@ -902,7 +911,7 @@ export default function App() {
     );
 
     return { left: safeLeftPx, top: safeTopPx, width: safeWidthPx, height: safeHeightPx };
-  }, [artworkCanvas, effectiveBleedAmount, canvasScale, pdfBoxInfo, trimCropEnabled, manualCropAmount, isCropMode, manualCropGuides]);
+  }, [artworkCanvas, effectiveBleedAmount, canvasScale, pdfBoxInfo, trimCropEnabled, manualCropAmount, isCropMode, manualCropGuides, safeZonePoints]);
 
   // 6. Quick Alignment Logic
   const handleQuickAlign = useCallback((alignment) => {
@@ -1349,6 +1358,7 @@ export default function App() {
                 canvasScale={canvasScale}
                 pdfBoxInfo={pdfBoxInfo}
                 showSafeLine={showSafeLine}
+                safeZonePoints={safeZonePoints}
                 bleedEnabled={bleedEnabled} // Draw actual Magenta Trim Line
                 bleedAmount={effectiveBleedAmount}
                 trimCropEnabled={trimCropEnabled}
@@ -1450,7 +1460,7 @@ export default function App() {
                     <span>PDF output</span>
                     <select id="pdf-output-mode" value={pdfOutputMode} onChange={event => setPdfOutputMode(event.target.value)}>
                       <option value="preserve">{artworkRepair ? 'Keep repaired RGB artwork' : 'Preserve vectors and source colors'}</option>
-                      <option value="compatibility">Flatten visible artwork (RGB)</option>
+                      <option value="compatibility">Last resort: flatten visible artwork (RGB)</option>
                     </select>
                   </label>
                   {pdfOutputMode === 'compatibility' && <>
@@ -1464,7 +1474,7 @@ export default function App() {
                     <p className="field-help">For objects or gradients that disappear when printed. Bakes the visible artwork into an opaque RGB image on white; the Union Bug stays vector.</p>
                     <p className="field-help">Source text/vectors, CMYK and spot plates become RGB pixels. Source output profiles are removed. Annotations/forms are excluded; overprint is not simulated. Confirm the preview and printer color settings, then test one page. Use a desktop transparency flattener when press colors or vector text must be retained.</p>
                   </>}
-                  {artworkRepair && <p className="field-help">Flattening repair applied at {artworkRepair.dpi} DPI in RGB. Source vectors, text and ink plates were converted to pixels. Reset Artwork restores the original PDF.</p>}
+                  {artworkRepair && <p className="field-help">RGB repair applied: {Object.entries(artworkRepair.pageDpi).map(([page, dpi]) => `page ${page} at ${dpi} DPI`).join(', ')}. Source vectors, text and ink plates on these pages became pixels. Reset Artwork restores the original PDF.</p>}
                 </div>
               )}
               {activeSidebarTab === 'stamper' ? (
@@ -1477,6 +1487,7 @@ export default function App() {
                   minScale={minScale}
                   maxScale={maxScale}
                   showSafeLine={showSafeLine}
+                  safeZonePoints={safeZonePoints}
                   bleedEnabled={bleedEnabled}
                   sourceHasBleed={pdfHasIncludedBleed}
                   isPdf={artworkType === 'pdf'}
@@ -1507,6 +1518,7 @@ export default function App() {
                   onColorSelect={setSelectedColor}
                   onScaleChange={setBugScale}
                   onShowSafeLineToggle={() => setShowSafeLine(!showSafeLine)}
+                  onSafeZoneChange={setSafeZonePoints}
                   onMultiPageOptionsChange={setMultiPageOptions}
                   onResetBug={resetUnionBugSettings}
                   bugFile={bugFile}
@@ -1516,6 +1528,7 @@ export default function App() {
                 />
               ) : (
                 <PreflightPanel
+                  currentPage={currentPage}
                   results={displayedPreflightResults}
                   isScanning={isScanning}
                   bleedAmount={effectiveBleedAmount}
