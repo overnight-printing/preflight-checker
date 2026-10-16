@@ -9,7 +9,6 @@ export default function EditorCanvas({
   position,      // { left: px, top: px }
   size,          // { width: px, height: px }
   cropMarksEnabled = false,
-  proposedTrimInsets = null,
   pdfBoxInfo = null, // Geometry box metadata (CropBox, TrimBox)
   canvasScale = 1.0,
   showSafeLine = true,
@@ -116,7 +115,7 @@ export default function EditorCanvas({
   }, [gridSizePx, snapToGrid]);
 
   // Compute dynamic top/bottom paddings for layout and zoom calculations
-  const topPadding = proposedTrimInsets ? 122 : pdfBoxInfo ? 46 : 40;
+  const topPadding = pdfBoxInfo ? 46 : 40;
   let bottomPadding = 40;
   if (totalPages > 1) {
     bottomPadding = isPageSelectorExpanded ? 300 : 140;
@@ -319,9 +318,9 @@ export default function EditorCanvas({
              )}
 
              {/* 1. Trim Line / Cut Line Overlay (Anchored to Canvas) */}
-             {showSafeLine && !proposedTrimInsets && (
+             {showSafeLine && (
                 <div 
-                  role="img" aria-label={pdfBoxInfo?.hasDistinctTrimBox ? 'Confirmed trim guide' : 'Page boundary guide'}
+                  role="img" aria-label={pdfBoxInfo?.hasDistinctTrimBox ? 'Trim guide' : 'Page boundary guide'}
                   style={{
                     position: 'absolute',
                     top: `${trimGuide.top}px`,
@@ -337,7 +336,7 @@ export default function EditorCanvas({
              )}
 
              {/* 2. Safe Area Dot Line (Anchored to Canvas) */}
-             {showSafeLine && !proposedTrimInsets && (
+             {showSafeLine && (
                 <div 
                   role="img" aria-label="Safe area guide"
                   style={{
@@ -353,13 +352,6 @@ export default function EditorCanvas({
                   }}
                 />
              )}
-
-             {proposedTrimInsets && <div role="img" aria-label="Suggested trim guide" style={{ position: 'absolute',
-               left: virtualBleedPx + (proposedTrimInsets.left - manualCropAmount - (trimCropEnabled ? pdfBoxInfo?.trimInsets.left || 0 : 0)) * canvasScale,
-               top: virtualBleedPx + (proposedTrimInsets.top - manualCropAmount - (trimCropEnabled ? pdfBoxInfo?.trimInsets.top || 0 : 0)) * canvasScale,
-               width: Math.max(0, ((pdfBoxInfo?.cropBox && (pdfBoxInfo.rotation % 180 === 0 ? pdfBoxInfo.cropBox.width : pdfBoxInfo.cropBox.height)) - proposedTrimInsets.left - proposedTrimInsets.right) * canvasScale),
-               height: Math.max(0, ((pdfBoxInfo?.cropBox && (pdfBoxInfo.rotation % 180 === 0 ? pdfBoxInfo.cropBox.height : pdfBoxInfo.cropBox.width)) - proposedTrimInsets.top - proposedTrimInsets.bottom) * canvasScale),
-               border: '2px dashed #d97706', pointerEvents: 'none', zIndex: 3, boxSizing: 'border-box' }} />}
 
              {/* 3. Interactive Crop Mode Overlay */}
              {isCropMode && (

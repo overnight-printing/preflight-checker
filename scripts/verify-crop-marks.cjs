@@ -26,6 +26,12 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
   const plain = await PDFDocument.create();
   plain.addPage([360, 252]).drawRectangle({ width: 360, height: 252, color: cmyk(1, 0, 0, 0) });
   fs.writeFileSync(out + '/crop-no-marks.pdf', await plain.save());
+  const ambiguous = await PDFDocument.create();
+  const ambiguousPage = ambiguous.addPage([360, 252]);
+  for (const trim of [{ x: 36, y: 36, width: 288, height: 180 }, { x: 45, y: 45, width: 270, height: 162 }]) {
+    for (const line of getCropMarkLines(trim, { x: 21, y: 21, width: 318, height: 210 })) ambiguousPage.drawLine({ start: { x: line.x1, y: line.y1 }, end: { x: line.x2, y: line.y2 }, color: cmyk(0, 0, 0, 1), thickness: 0.5 });
+  }
+  fs.writeFileSync(out + '/crop-ambiguous.pdf', await ambiguous.save());
   const annotated = await PDFDocument.load(new Uint8Array(sourceBytes));
   annotated.getPage(0).node.set(PDFName.of('Annots'), annotated.context.obj([{ Type: 'Annot', Subtype: 'Text', Rect: [10, 20, 25, 35], F: 4 }]));
   fs.writeFileSync(out + '/crop-marks-annotated.pdf', await annotated.save());
@@ -40,30 +46,28 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
     await page.goto(process.env.PREFLIGHT_BASE_URL || 'http://127.0.0.1:5173');
     const result = await page.evaluate(async ({ sourceBytes, stampBytes }) => {
       const { loadPDF, stitchBugToPDF } = await import('/src/utils/pdfProcessor.js');
-      const { detectPageCropMarks } = await import('/src/utils/detectPageCropMarks.js');
-      const { applyReviewedTrim } = await import('/src/utils/reviewedTrim.js');
+      const { normalizePdfTrim } = await import('/src/utils/normalizePdfTrim.js');
       const { getVisibleBoxInsets } = await import('/src/utils/cropMarks.js');
       const file = new File([new Uint8Array(sourceBytes)], 'marked.pdf');
       const bug = new File([new Uint8Array(stampBytes)], 'stamp.pdf');
       const doc = await loadPDF(file);
-      const scans = [], images = [];
-      for (let number = 1; number <= doc.numPages; number++) {
-        const pdfPage = await doc.getPage(number);
-        const scan = await detectPageCropMarks(pdfPage, new AbortController().signal);
-        scans.push(scan);
-        if (number === 1) {
-          const viewport = pdfPage.getViewport({ scale: 2 });
-          const canvas = document.createElement('canvas');
-          canvas.width = viewport.width; canvas.height = viewport.height;
-          await pdfPage.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-          images.push(canvas.toDataURL('image/png'));
-        }
-      }
-      let reviewed = file;
-      for (let number = 1; number <= scans.length; number++) {
-        if (scans[number - 1].status !== 'found') throw new Error(`Marks not recognized on page ${number}: ${JSON.stringify(scans[number - 1])}`);
-        reviewed = new File([await applyReviewedTrim(reviewed, number, scans[number - 1].insets, scans[number - 1].segments)], 'reviewed.pdf');
-      }
+      const normalized = await normalizePdfTrim(file, doc, new AbortController().signal);
+      const scans = Object.values(normalized.reviews), images = [];
+      if (scans.length !== 4 || scans.some(scan => scan.status !== 'found' || !scan.applied)) throw new Error('All pages must receive ordinary trim metadata during import.');
+      const pdfPage = await doc.getPage(1), viewport = pdfPage.getViewport({ scale: 2 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width; canvas.height = viewport.height;
+      await pdfPage.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      images.push(canvas.toDataURL('image/png'));
+      const reviewed = new File([normalized.bytes], 'normalized.pdf');
+      const normalizedDoc = await loadPDF(reviewed);
+      const unchanged = await normalizePdfTrim(reviewed, normalizedDoc, new AbortController().signal);
+      if (unchanged.bytes !== null || Object.keys(unchanged.reviews).length) throw new Error('Existing trim metadata must be authoritative.');
+      await normalizedDoc.destroy();
+      const canceled = new AbortController();
+      canceled.abort();
+      try { await normalizePdfTrim(file, doc, canceled.signal); throw new Error('Canceled normalization must stop'); }
+      catch (error) { if (error.name !== 'AbortError') throw error; }
       const outputs = {};
       for (const [name, bleed, crop, marks, enabled] of [
         ['marks-only', 0, false, true, true], ['marks-bleed', 9, false, true, true],
@@ -141,29 +145,24 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
     if (process.env.PREFLIGHT_PRODUCTION_URL) await page.goto(process.env.PREFLIGHT_PRODUCTION_URL);
     const upload = () => page.locator('input[type=file]').first();
     await upload().setInputFiles(out + '/canva-like-flat.pdf');
-    const review = page.getByRole('region', { name: 'Crop mark review' });
-    await review.getByText('Printed crop marks', { exact: true }).waitFor();
-    await page.getByLabel('Suggested trim guide', { exact: true }).waitFor();
     const summary = page.getByLabel('Document size summary');
-    assert.ok((await summary.innerText()).includes('Detected trim · unconfirmed'));
-    assert.ok((await summary.innerText()).includes('4.00" × 2.58"'));
-    assert.equal(await page.getByRole('img', { name: 'Page boundary guide', exact: true }).count(), 0);
-    assert.equal(await page.getByRole('img', { name: 'Safe area guide', exact: true }).count(), 0);
-    const originalCanvasSize = await page.locator('.artwork-canvas canvas').evaluate(canvas => [canvas.width, canvas.height]);
-    const left = page.getByLabel('Detected trim left inset in inches', { exact: true });
-    await left.fill('0.4166667');
-    await left.press('Enter');
-    await summary.getByRole('button', { name: 'Confirm trim', exact: true }).click();
-    await review.getByText('Reviewed trim size', { exact: true }).waitFor();
-    await page.waitForFunction(() => !document.querySelector('.tool-controls').disabled);
-    assert.equal(await summary.getByRole('button', { name: 'Confirm trim', exact: true }).count(), 0);
+    const loaded = async () => {
+      await page.locator('.artwork-canvas canvas').waitFor();
+      await page.waitForFunction(() => document.querySelector('main')?.getAttribute('aria-busy') === 'false');
+      assert.equal(await page.getByRole('region', { name: 'Crop mark review' }).count(), 0);
+      assert.equal(await page.getByRole('button', { name: 'Confirm trim', exact: true }).count(), 0);
+      assert.equal(await page.getByLabel('Suggested trim guide', { exact: true }).count(), 0);
+      assert.ok(!(await summary.innerText()).includes('unconfirmed'));
+    };
+    await loaded();
     assert.ok((await summary.innerText()).includes('Trim Size'));
-    assert.equal(await page.getByRole('img', { name: 'Confirmed trim guide', exact: true }).count(), 1);
-    assert.deepEqual(await page.locator('.artwork-canvas canvas').evaluate(canvas => [canvas.width, canvas.height]), originalCanvasSize);
+    assert.ok((await summary.innerText()).includes('4.00" × 2.58"'));
+    assert.equal(await page.getByRole('img', { name: 'Trim guide', exact: true }).count(), 1);
+    assert.equal(await page.getByRole('img', { name: 'Safe area guide', exact: true }).count(), 1);
+    assert.deepEqual(await page.locator('.artwork-canvas canvas').evaluate(canvas => [canvas.width, canvas.height]), [540, 378]);
     await page.getByRole('button', { name: 'Stamper Settings', exact: true }).click();
     assert.equal(await page.getByRole('checkbox', { name: 'Crop to trim box', exact: true }).isChecked(), false);
     await page.getByRole('checkbox', { name: 'Add mirror bleed', exact: true }).check();
-    await page.getByText(/Mirroring the outer page may repeat them/).waitFor();
     await page.getByRole('checkbox', { name: 'Add crop marks', exact: true }).check();
     assert.equal(await page.getByRole('img', { name: 'Crop marks preview' }).locator('line').count(), 8);
     const save = page.getByRole('button', { name: 'Save Production File', exact: true });
@@ -183,38 +182,37 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
     await page.getByRole('checkbox', { name: 'Add crop marks', exact: true }).uncheck();
     assert.equal(await page.getByRole('img', { name: 'Crop marks preview' }).count(), 0);
     await upload().setInputFiles(out + '/crop-mark-vector.pdf');
-    await review.getByText('Printed crop marks', { exact: true }).waitFor();
+    await loaded();
     assert.equal(await page.getByRole('checkbox', { name: 'Add crop marks', exact: true }).isChecked(), false);
-    await review.getByRole('button', { name: 'Dismiss trim suggestion', exact: true }).click();
-    assert.equal(await page.getByLabel('Suggested trim guide', { exact: true }).count(), 0);
-    await review.getByRole('button', { name: 'Detect again', exact: true }).click();
-    await page.getByLabel('Suggested trim guide', { exact: true }).waitFor();
+    // Export before visiting later pages: every page must already carry the recognized trim.
+    const allPagesDownload = page.waitForEvent('download');
+    await save.click();
+    await (await allPagesDownload).saveAs(out + '/all-pages-normalized.pdf');
+    const allPages = await PDFDocument.load(fs.readFileSync(out + '/all-pages-normalized.pdf'));
+    allPages.getPages().forEach(pdfPage => {
+      assert.ok(Math.abs(pdfPage.getTrimBox().width - 288) < 0.6 && Math.abs(pdfPage.getTrimBox().height - 186) < 0.6);
+    });
     await page.getByRole('button', { name: 'Next page', exact: true }).click();
-    await page.getByText('Page 2 of 4', { exact: false }).first().waitFor();
-    await page.getByLabel('Detected trim left inset in inches', { exact: true }).waitFor();
-    assert.equal(await page.getByLabel('Detected trim left inset in inches', { exact: true }).inputValue(), '0.583');
-    await page.waitForFunction(() => document.querySelector('main').getAttribute('aria-busy') === 'false');
+    await loaded();
+    assert.ok((await summary.innerText()).includes('2.58" × 4.00"'));
     await page.getByRole('button', { name: 'Previous page', exact: true }).click();
-    await review.getByText('Printed crop marks', { exact: true }).waitFor();
-    assert.equal(await page.getByLabel('Detected trim left inset in inches', { exact: true }).inputValue(), '0.417');
-    await upload().setInputFiles(out + '/marks-cropped.pdf');
-    await page.locator('.artwork-canvas canvas').waitFor();
-    assert.equal(await review.count(), 0, 'A distinct source TrimBox is authoritative');
+    await loaded();
+    assert.ok((await summary.innerText()).includes('4.00" × 2.58"'));
+    for (const name of ['marks-cropped', 'crop-no-marks', 'crop-ambiguous']) {
+      await upload().setInputFiles(out + '/' + name + '.pdf');
+      await loaded();
+      const unchanged = page.waitForEvent('download');
+      await save.click();
+      await (await unchanged).saveAs(out + '/' + name + '-unchanged.pdf');
+      assert.ok(fs.readFileSync(out + '/' + name + '-unchanged.pdf').equals(fs.readFileSync(out + '/' + name + '.pdf')), name + ' must remain unchanged');
+    }
+    // Replacing artwork during import must not install the previous file's recognized trim.
+    await upload().setInputFiles(out + '/crop-mark-vector.pdf');
     await upload().setInputFiles(out + '/crop-no-marks.pdf');
-    await review.getByText(/No reliable trim detected/).waitFor();
-    assert.equal(await page.getByLabel('Suggested trim guide', { exact: true }).count(), 0);
-    await review.getByRole('button', { name: 'Set trim manually', exact: true }).click();
-    const manualLeft = page.getByLabel('Detected trim left inset in inches', { exact: true });
-    await manualLeft.fill('10');
-    await manualLeft.press('Enter');
-    assert.equal(await review.getByRole('button', { name: 'Use this trim size', exact: true }).isDisabled(), true);
-    await manualLeft.fill('0.25');
-    await manualLeft.press('Enter');
-    await review.getByRole('button', { name: 'Use this trim size', exact: true }).click();
-    await review.getByText('Reviewed trim size', { exact: true }).waitFor();
-    await page.waitForFunction(() => !document.querySelector('.tool-controls').disabled);
+    await loaded();
+    assert.ok((await summary.innerText()).includes('5.00" × 3.50"'));
     await upload().setInputFiles(out + '/crop-marks-annotated.pdf');
-    await review.getByText('Printed crop marks', { exact: true }).waitFor();
+    await loaded();
     await page.getByRole('checkbox', { name: 'Add crop marks', exact: true }).check();
     await page.getByRole('button', { name: 'Preflight', exact: true }).click();
     await page.getByRole('button', { name: 'Check production output', exact: true }).click();
@@ -234,30 +232,14 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
     if (process.env.PREFLIGHT_RMD_SAMPLE) {
       const original = await PDFDocument.load(fs.readFileSync(process.env.PREFLIGHT_RMD_SAMPLE));
       await upload().setInputFiles(process.env.PREFLIGHT_RMD_SAMPLE);
-      for (let number = 1; number <= original.getPageCount(); number++) {
-        await review.getByText('Printed crop marks', { exact: true }).waitFor();
-        assert.ok((await summary.innerText()).includes('Detected trim · unconfirmed'));
-        assert.ok((await summary.innerText()).includes('16.00" × 8.50"'));
-        assert.equal(await review.getByLabel('Uniform trim inset in inches', { exact: true }).inputValue(), '0.237');
-        assert.equal(await review.locator('.trim-inset-fields').count(), 0);
-        if (number === 1) {
-          await page.screenshot({ path: out + '/rmd-pending-ui.png', fullPage: true });
-          const pending = page.waitForEvent('download');
-          await save.click();
-          await (await pending).saveAs(out + '/rmd-unconfirmed.pdf');
-          assert.ok(fs.readFileSync(out + '/rmd-unconfirmed.pdf').equals(fs.readFileSync(process.env.PREFLIGHT_RMD_SAMPLE)), 'Suggestions must not change unconfirmed PDF output');
-        }
-        const suggestion = (await review.innerText()).match(/Suggested trim \(unconfirmed\): ([\d.]+)″ × ([\d.]+)″/);
-        assert.ok(suggestion && Math.abs(Number(suggestion[1]) - 16) < 0.005 && Math.abs(Number(suggestion[2]) - 8.5) < 0.005);
-        await summary.getByRole('button', { name: 'Confirm trim', exact: true }).click();
-        await review.getByText('Reviewed trim size', { exact: true }).waitFor();
-        await page.waitForFunction(() => !document.querySelector('.tool-controls').disabled);
-        if (number < original.getPageCount()) await page.getByRole('button', { name: 'Next page', exact: true }).click();
-      }
+      await loaded();
+      assert.ok((await summary.innerText()).includes('16.00" × 8.50"'));
+      assert.equal(await page.getByRole('img', { name: 'Trim guide', exact: true }).count(), 1);
+      await page.screenshot({ path: out + '/rmd-normal-ui.png', fullPage: true });
       const download = page.waitForEvent('download');
       await save.click();
-      await (await download).saveAs(out + '/rmd-reviewed.pdf');
-      const reviewed = await PDFDocument.load(fs.readFileSync(out + '/rmd-reviewed.pdf'));
+      await (await download).saveAs(out + '/rmd-normalized.pdf');
+      const reviewed = await PDFDocument.load(fs.readFileSync(out + '/rmd-normalized.pdf'));
       assert.equal(reviewed.getPageCount(), original.getPageCount());
       for (const [index, pdfPage] of reviewed.getPages().entries()) {
         assert.deepEqual(pdfPage.getMediaBox(), original.getPage(index).getMediaBox());
@@ -268,13 +250,20 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
         assert.ok(Math.max(...insets) - Math.min(...insets) < 0.0001, 'All four trim insets must match');
       }
       assert.deepEqual(imageStreams(reviewed), imageStreams(original), 'Retain both original CMYK image streams byte for byte');
-      fs.writeFileSync(out + '/rmd-reviewed-verification.txt', execFileSync('pdfinfo', ['-box', out + '/rmd-reviewed.pdf']));
-      fs.appendFileSync(out + '/rmd-reviewed-verification.txt', execFileSync('pdfimages', ['-list', out + '/rmd-reviewed.pdf']));
-      execFileSync('pdftoppm', ['-scale-to', '1400', '-png', out + '/rmd-reviewed.pdf', out + '/rmd-reviewed']);
-      await page.screenshot({ path: out + '/rmd-reviewed-ui.png', fullPage: true });
+      fs.writeFileSync(out + '/rmd-normalized-verification.txt', execFileSync('pdfinfo', ['-box', out + '/rmd-normalized.pdf']));
+      fs.appendFileSync(out + '/rmd-normalized-verification.txt', execFileSync('pdfimages', ['-list', out + '/rmd-normalized.pdf']));
+      execFileSync('pdftoppm', ['-scale-to', '1400', '-png', out + '/rmd-normalized.pdf', out + '/rmd-normalized']);
+      await page.getByRole('button', { name: 'Next page', exact: true }).click();
+      await loaded();
+      assert.ok((await summary.innerText()).includes('16.00" × 8.50"'));
+      await page.screenshot({ path: out + '/rmd-normalized-ui.png', fullPage: true });
       console.log('Actual Canva brochure passed: both trims approximately 16 × 8.5 inches, full page preserved, original CMYK image bytes unchanged.');
     }
     assert.deepEqual(errors, []);
-    console.log('Crop marks passed: raster/vector detection, offsets/rotations, review without cropping, CMYK vector marks, boxes, original resources, UI warning, marks toggle and reset.');
+    console.log('Crop marks passed: raster/vector detection, offsets/rotations, automatic import trim, no special UI, all-page output, CMYK vector marks, boxes, original resources, cancellation, marks toggle and reset.');
+  } catch (error) {
+    await page.screenshot({ path: out + '/crop-mark-failure.png', fullPage: true });
+    console.error(await page.locator('body').innerText());
+    throw error;
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exit(1); });

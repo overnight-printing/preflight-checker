@@ -5,7 +5,6 @@ import EditorCanvas from './components/EditorCanvas';
 import ControlPanel from './components/ControlPanel';
 import PageSelector from './components/PageSelector';
 import PreflightPanel from './components/PreflightPanel';
-import CropMarkReview from './components/CropMarkReview';
 
 import { drawMirrorBleed, stitchBugToImage } from './utils/canvasProcessor';
 
@@ -17,8 +16,7 @@ const stitchBugToPDF = async (...args) => (await import('./utils/pdfProcessor'))
 const runPreflightChecks = async (...args) => (await import('./utils/preflightChecker')).runPreflightChecks(...args);
 const fixOrderBoxes = async (...args) => (await import('./utils/preflightChecker')).fixOrderBoxes(...args);
 const getPdfBytes = async (...args) => (await import('./utils/pdfSource')).getPdfBytes(...args);
-const applyReviewedTrim = async (...args) => (await import('./utils/reviewedTrim')).applyReviewedTrim(...args);
-const detectPageCropMarks = async (...args) => (await import('./utils/detectPageCropMarks')).detectPageCropMarks(...args);
+const normalizePdfTrim = async (...args) => (await import('./utils/normalizePdfTrim')).normalizePdfTrim(...args);
 const fixBlankPage = async (...args) => (await import('./utils/preflightChecker')).fixBlankPage(...args);
 const createCustomerProofPdf = async (...args) => (await import('./utils/customerProof')).createCustomerProofPdf(...args);
 const createPngProofSourcePdf = async (...args) => (await import('./utils/customerProof')).createPngProofSourcePdf(...args);
@@ -36,7 +34,6 @@ import {
   translatePositionForBleed
 } from './utils/layoutMath';
 import { getOutputGeometry, rotatedSize } from './utils/pdfGeometry';
-import { getReviewSize } from './utils/cropMarks';
 import { validateArtworkFile, MAX_PDF_BYTES } from './utils/fileValidation';
 import { normalizeProofId, proofIdForFilename } from './utils/proofId';
 import { DEFAULT_PRINT_REQUIREMENTS } from './utils/printSettings';
@@ -147,8 +144,6 @@ export default function App() {
   const [bleedAmount, setBleedAmount] = useState(9.0); // Default 0.125" in PDF points
   const [cropMarksEnabled, setCropMarksEnabled] = useState(false);
   const [cropMarkReviews, setCropMarkReviews] = useState({});
-  const [cropMarkScanRevision, setCropMarkScanRevision] = useState(0);
-  const cropMarkReview = cropMarkReviews[currentPage];
   const [trimCropEnabled, setTrimCropEnabled] = useState(false); // New non-destructive crop toggle
   const [manualCropAmount, setManualCropAmount] = useState(0); // Manual inset in points (72pt = 1 inch)
   const [isCropMode] = useState(false); // Interactive visual crop mode disabled
@@ -203,6 +198,7 @@ export default function App() {
   const [isGlobalDragActive, setIsGlobalDragActive] = useState(false);
   const dragCounter = useRef(0);
   const artworkLoadRequestIdRef = useRef(0);
+  const artworkLoadControllerRef = useRef(null);
   const renderRequestIdRef = useRef(0);
   const scanRequestIdRef = useRef(0);
   const bugRequestIdRef = useRef(0);
@@ -271,11 +267,6 @@ export default function App() {
 
   let geometryDetails = null;
   let geometryError = '';
-  let proposedTrim = null;
-  if (pdfBoxInfo?.pageNum === currentPage && cropMarkReview?.status === 'found' && !cropMarkReview.applied && cropMarkReview.insets) {
-    try { proposedTrim = getReviewSize(pdfBoxInfo.cropBox, pdfBoxInfo.rotation, cropMarkReview.insets); }
-    catch { /* Invalid drafts stay in the review panel until corrected. */ }
-  }
   if (pdfBoxInfo) {
     try {
       const { trimBox, outputBox } = getOutputGeometry(pdfBoxInfo, {
@@ -379,10 +370,15 @@ export default function App() {
     setHasDoneInitialAlignment(false);
   }, [minScale, maxScale]);
 
+  useEffect(() => () => artworkLoadControllerRef.current?.abort(), []);
+
   // 1. Handle Artwork File Upload
   const handleArtworkSelect = useCallback(async (file) => {
     const validationError = validateArtworkFile(file);
     if (validationError) { setNotice({ type: 'error', message: validationError }); return; }
+    artworkLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    artworkLoadControllerRef.current = controller;
     const requestId = artworkLoadRequestIdRef.current + 1;
     artworkLoadRequestIdRef.current = requestId;
     renderRequestIdRef.current += 1;
@@ -422,11 +418,27 @@ export default function App() {
       
       if (extension === 'pdf') {
         setArtworkType('pdf');
-        const doc = await loadPDF(file);
-        if (requestId !== artworkLoadRequestIdRef.current) { await doc.destroy(); return; }
-        setPdfDoc(doc);
-        setTotalPages(doc.numPages);
-        setCurrentPage(1);
+        let doc = await loadPDF(file);
+        try {
+          const normalized = await normalizePdfTrim(file, doc, controller.signal);
+          if (normalized.bytes) {
+            await doc.destroy();
+            doc = null;
+            controller.signal.throwIfAborted();
+            const normalizedFile = new File([normalized.bytes], file.name, { type: 'application/pdf' });
+            doc = await loadPDF(normalizedFile);
+            controller.signal.throwIfAborted();
+            setArtworkFile(normalizedFile);
+          }
+          controller.signal.throwIfAborted();
+          setCropMarkReviews(normalized.reviews);
+          setPdfDoc(doc);
+          setTotalPages(doc.numPages);
+          setCurrentPage(1);
+        } catch (error) {
+          await doc?.destroy();
+          throw error;
+        }
       } else {
         setArtworkType('image');
         setPdfDoc(null);
@@ -520,6 +532,7 @@ export default function App() {
 
   // Clears the artwork state
   const handleClearArtwork = () => {
+    artworkLoadControllerRef.current?.abort();
     artworkLoadRequestIdRef.current += 1;
     renderRequestIdRef.current += 1;
     scanRequestIdRef.current += 1;
@@ -718,29 +731,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveBleedAmount, bleedEnabled, bleedAmount, trimCropEnabled, manualCropAmount, currentPage, originalImage, pdfDoc, pdfBoxInfo, canvasScale]);
 
-  useEffect(() => {
-    if (!pdfDoc || !artworkCanvas || !pdfBoxInfo || pdfBoxInfo.pageNum !== currentPage) return;
-    const review = cropMarkReviews[currentPage];
-    if ((review && review.status !== 'scanning') || (pdfBoxInfo.hasDistinctTrimBox && !review)) return;
-    const controller = new AbortController();
-    const loadRequest = artworkLoadRequestIdRef.current;
-    let active = true;
-    setCropMarkReviews(reviews => ({ ...reviews, [currentPage]: { status: 'scanning' } }));
-    const scan = async () => {
-      try {
-        const page = await pdfDoc.getPage(currentPage);
-        const result = await detectPageCropMarks(page, controller.signal);
-        if (active && loadRequest === artworkLoadRequestIdRef.current) setCropMarkReviews(reviews => ({ ...reviews, [currentPage]: result }));
-      } catch (error) {
-        if (active && loadRequest === artworkLoadRequestIdRef.current) setCropMarkReviews(reviews => ({ ...reviews, [currentPage]: { status: 'error', message: `Crop-mark detection could not complete. ${error.message}` } }));
-      }
-    };
-    scan();
-    return () => { active = false; controller.abort(); };
-    // Review edits must not restart detection; the revision explicitly retries it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdfDoc, currentPage, pdfBoxInfo, artworkCanvas, cropMarkScanRevision]);
-
   // 2. Handle Union Bug File Upload
   const handleBugSelect = async (file) => {
     const requestId = ++bugRequestIdRef.current;
@@ -772,6 +762,7 @@ export default function App() {
     const wPx = bugBaseSize.width * (bugScale / 100) * canvasScale;
     const hPx = bugBaseSize.height * (bugScale / 100) * canvasScale;
     
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setBugSize({ width: wPx, height: hPx });
   }, [bugScale, bugBaseSize, canvasScale, artworkCanvas]);
 
@@ -821,12 +812,14 @@ export default function App() {
 
   // Execute contrast analysis whenever the position or page changes
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     runContrastAnalysis();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bugPosition, bugSize, artworkCanvas, bugEnabled]);
 
   useEffect(() => {
     if (!artworkFile || artworkType !== 'pdf' || !pdfDoc) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPreflightResults(null);
     }
   }, [artworkFile, pdfDoc, artworkType]);
@@ -869,8 +862,6 @@ export default function App() {
         setBleedEnabled(true);
         setNotice({ type: 'success', message: `Mirror bleed set to ${(amount / 72).toFixed(3)}" on each edge. Check production output, then Save Production File to download the repaired PDF.` });
         return;
-      } else if (checkKey === 'reviewedTrim') {
-        updatedBytes = await applyReviewedTrim(artworkFile, currentPage, cropMarkReview?.insets, cropMarkReview?.segments);
       } else if (checkKey === 'flattenArtwork') {
         updatedBytes = await createCompatibilityArtworkPdf(artworkFile, pdfDoc, compatibilityDpi, [currentPage]);
         repair = {
@@ -895,7 +886,6 @@ export default function App() {
         // Re-load corrected PDF
         const doc = await loadPDF(correctedFile);
         if (requestId !== artworkLoadRequestIdRef.current) { await doc.destroy(); return; }
-        if (checkKey === 'reviewedTrim') setCropMarkReviews(reviews => ({ ...reviews, [currentPage]: { ...reviews[currentPage], applied: true } }));
         if (pagesToRemove.length) {
           setCropMarkReviews(reviews => Object.fromEntries(Object.entries(reviews).filter(([page]) => !pagesToRemove.includes(Number(page))).map(([page, review]) => [Number(page) - pagesToRemove.filter(number => number < Number(page)).length, review])));
           setPagePositions({});
@@ -1031,6 +1021,7 @@ export default function App() {
   useEffect(() => {
     if (artworkCanvas && bugSize) {
       if (!hasDoneInitialAlignment) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         handleQuickAlign('bottom-right');
         setHasDoneInitialAlignment(true);
       } else if (currentAlignment !== 'custom') {
@@ -1390,8 +1381,8 @@ export default function App() {
               {geometryDetails && (
                 <div className="pdf-geometry-info-card" aria-label="Document size summary">
                   <div className="geometry-stat">
-                    <span>{proposedTrim ? `${cropMarkReview.detected ? 'Detected' : 'Proposed'} trim · unconfirmed` : 'Trim Size'}</span>
-                    <strong>{proposedTrim ? formatPtToInches(proposedTrim.width, proposedTrim.height) : geometryDetails.trimSize}</strong>
+                    <span>Trim Size</span>
+                    <strong>{geometryDetails.trimSize}</strong>
                   </div>
                   <div className="geometry-stat">
                     <span>Output Size</span>
@@ -1405,10 +1396,6 @@ export default function App() {
                     <span>Pages</span>
                     <strong>{geometryDetails.pages}</strong>
                   </div>
-                  {proposedTrim && <div className="geometry-trim-review" role="status">
-                    <span>Orange dashed line: proposed cut. Confirm to use this trim.</span>
-                    <button type="button" className="btn btn-secondary" disabled={controlsBusy} onClick={() => handlePreflightFix('reviewedTrim')}>Confirm trim</button>
-                  </div>}
                 </div>
               )}
 
@@ -1421,7 +1408,6 @@ export default function App() {
                 canvasScale={canvasScale}
                 pdfBoxInfo={pdfBoxInfo}
                 cropMarksEnabled={artworkType === 'pdf' && cropMarksEnabled}
-                proposedTrimInsets={proposedTrim ? cropMarkReview.insets : null}
                 showSafeLine={showSafeLine}
                 safeZonePoints={safeZonePoints}
                 bleedEnabled={bleedEnabled} // Draw actual Magenta Trim Line
@@ -1519,17 +1505,6 @@ export default function App() {
               </div>
 
               <fieldset className="tool-controls" disabled={controlsBusy}>
-              {artworkType === 'pdf' && <CropMarkReview
-                review={cropMarkReview} boxInfo={pdfBoxInfo}
-                onEdit={insets => setCropMarkReviews(reviews => ({ ...reviews, [currentPage]: { ...reviews[currentPage], status: 'found', insets, applied: false } }))}
-                onApply={() => handlePreflightFix('reviewedTrim')}
-                onDismiss={() => setCropMarkReviews(reviews => ({ ...reviews, [currentPage]: { ...reviews[currentPage], status: 'dismissed' } }))}
-                onDetectAgain={() => {
-                  setCropMarkReviews(reviews => ({ ...reviews, [currentPage]: { ...reviews[currentPage], status: 'scanning' } }));
-                  setCropMarkScanRevision(revision => revision + 1);
-                }}
-              />}
-              {artworkType === 'pdf' && bleedEnabled && !trimCropEnabled && cropMarkReview?.detected && <p className="field-help crop-mark-warning" role="status">This page contains printed crop marks. Mirroring the outer page may repeat them. Enable Crop to trim box only if you want to exclude that outer area.</p>}
               {artworkType === 'pdf' && (
                 <div className="pdf-output-settings print-requirements">
                   <label className="select-field" htmlFor="pdf-output-mode">

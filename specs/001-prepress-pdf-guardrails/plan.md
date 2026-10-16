@@ -67,6 +67,7 @@ public/
 ## Required Design Decisions
 
 - Explicit PDF box metadata is authoritative.
+- When distinct trim metadata is missing, reliable printed crop marks are normalized to ordinary TrimBox metadata during import, as requested on 2026-10-16. Existing distinct trim stays authoritative; missing/ambiguous marks leave the source unchanged. Recognition does not infer bleed or crop artwork.
 - Dimension-pattern heuristics are forbidden for included bleed detection.
 - User-selected mirror bleed is additive outside the current output base.
 - Normal PDF exports must preserve PDF resources and avoid RGB PNG edge strips.

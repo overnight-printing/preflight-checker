@@ -1,4 +1,4 @@
-import { rotateInsets, rotatedSize } from './pdfGeometry.js';
+import { rotateInsets } from './pdfGeometry.js';
 
 export { CROP_MARK_LENGTH, CROP_MARK_GAP, CROP_MARK_MARGIN, getCropMarkLines } from './pdfGeometry.js';
 
@@ -21,8 +21,4 @@ export function getReviewedTrimBox(cropBox, rotation, insets) {
 export function getVisibleBoxInsets(box, cropBox, rotation) {
   return rotateInsets({ left: box.x - cropBox.x, bottom: box.y - cropBox.y,
     right: cropBox.x + cropBox.width - box.x - box.width, top: cropBox.y + cropBox.height - box.y - box.height }, rotation);
-}
-
-export function getReviewSize(cropBox, rotation, insets) {
-  return rotatedSize(getReviewedTrimBox(cropBox, rotation, insets), rotation);
 }

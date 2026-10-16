@@ -121,6 +121,7 @@ A print operator needs exported proof files to stay close to the original qualit
 - **FR-016**: The system MUST run a PDF verification checklist for changes that touch PDF box handling, mirror bleed, Union Bug placement, upload state, or export file generation.
 - **FR-017**: The system MUST verify representative outputs with `pdfinfo -box`, `pdfimages -list`, and a rendered visual preview before claiming a PDF export fix is complete.
 - **FR-018**: The system MUST document any remaining browser automation or direct app export verification gaps when they cannot be completed.
+- **FR-019**: When a page lacks distinct trim metadata, reliable printed crop marks MUST become ordinary TrimBox metadata during import, across all pages before export. The editor MUST use the normal size display, guides, preflight and export paths without a special recognition panel or confirmation step. Existing distinct TrimBoxes MUST remain authoritative; ambiguous/missing marks MUST leave the page unchanged. Original artwork and MediaBox/CropBox MUST remain intact, and included bleed MUST NOT be inferred from mark margins.
 
 ### Required Regression Fixtures
 

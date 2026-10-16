@@ -5,6 +5,11 @@ import { rotatedSize } from './pdfGeometry.js';
 
 export async function applyReviewedTrim(file, pageNumber, insets, segments = []) {
   const doc = await getPdfDocument(file, true);
+  setPageTrim(doc, pageNumber, insets, segments);
+  return doc.save({ useObjectStreams: true });
+}
+
+export function setPageTrim(doc, pageNumber, insets, segments = []) {
   if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > doc.getPageCount()) throw new Error('Invalid page number.');
   const page = doc.getPage(pageNumber - 1);
   const unit = doc.context.lookup(page.node.get(PDFName.of('UserUnit')))?.asNumber() || 1;
@@ -26,5 +31,4 @@ export async function applyReviewedTrim(file, pageNumber, insets, segments = [])
   }
   page.setTrimBox(trim.x, trim.y, trim.width, trim.height);
   page.setBleedBox(bleed.x, bleed.y, bleed.width, bleed.height);
-  return doc.save({ useObjectStreams: true });
 }
