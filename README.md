@@ -282,6 +282,8 @@ All PDF dimensions use PDF points internally:
 
 ### Guide colors
 
+Dimension fields keep your text and cursor position while you type. Press Enter or leave a field to apply it; Escape cancels the edit. Empty or invalid entries return to the previous value. Preview redraws keep the controls editable; repairs and exports still lock them.
+
 - Blue or magenta solid line: trim/cut boundary.
 - Cyan dashed line: configurable safe zone inset (default 9 pt) inside the trim boundary.
 

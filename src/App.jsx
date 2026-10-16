@@ -165,6 +165,7 @@ export default function App() {
 
   // Loading States
   const [isLoading, setIsLoading] = useState(false);
+  const [isRendering, setIsRendering] = useState(false);
   const [isBugRendering, setIsBugRendering] = useState(false);
   const [isBugLoading, setIsBugLoading] = useState(false);
   const [notice, setNotice] = useState(null);
@@ -293,7 +294,8 @@ export default function App() {
   const pageSelection = resolveTargetPages(multiPageOptions, totalPages, currentPage);
   const selectionError = bugEnabled ? pageSelection.error || (pageSelection.pages.length === 0 ? 'No pages selected for the Union Bug.' : '') : '';
   const exportError = geometryError || selectionError || (bugEnabled && (!bugFile || !bugCanvas) ? 'Load a Union Bug PDF before exporting.' : '');
-  const isBusy = isLoading || isBugLoading || isExporting || isGeneratingProof;
+  const controlsBusy = isLoading || isBugLoading || isExporting || isGeneratingProof || isScanning;
+  const isBusy = controlsBusy || isRendering;
   const canExport = artworkCanvas && !isBusy && !isScanning && !isBugRendering && !exportError;
   const exportSettingsKey = JSON.stringify({
     bleedEnabled, bleedAmount, trimCropEnabled, manualCropAmount, bugEnabled,
@@ -373,6 +375,7 @@ export default function App() {
     renderRequestIdRef.current += 1;
 
     setIsLoading(true);
+    setIsRendering(false);
     setNotice(null);
     scanRequestIdRef.current += 1;
     setIsScanning(false);
@@ -506,6 +509,7 @@ export default function App() {
     renderRequestIdRef.current += 1;
     scanRequestIdRef.current += 1;
     setIsLoading(false);
+    setIsRendering(false);
     setIsScanning(false);
     setPreflightResults(null);
     setNotice(null);
@@ -672,7 +676,7 @@ export default function App() {
     const updateArtworkRender = async () => {
       const requestId = renderRequestIdRef.current + 1;
       renderRequestIdRef.current = requestId;
-      setIsLoading(true);
+      setIsRendering(true);
       try {
         if (artworkType === 'pdf' && pdfDoc) {
           await renderPage(pdfDoc, currentPage, effectiveBleedAmount, trimCropEnabled, pdfBoxInfo, manualCropAmount, requestId);
@@ -687,6 +691,7 @@ export default function App() {
       } finally {
         if (requestId === renderRequestIdRef.current) {
           setIsLoading(false);
+          setIsRendering(false);
         }
       }
     };
@@ -1467,7 +1472,7 @@ export default function App() {
                 />
               </div>
 
-              <fieldset className="tool-controls" disabled={isBusy || isScanning}>
+              <fieldset className="tool-controls" disabled={controlsBusy}>
               {artworkType === 'pdf' && (
                 <div className="pdf-output-settings print-requirements">
                   <label className="select-field" htmlFor="pdf-output-mode">
@@ -1634,7 +1639,7 @@ export default function App() {
       </main>
 
       {/* Global loading spinner screen */}
-      {isLoading && (
+      {(isLoading || (isRendering && !artworkCanvas)) && (
         <div className="loading-overlay" role="status" aria-live="polite">
           <div className="spinner" />
           <h4 style={{ fontSize: '15px', fontWeight: '500' }}>Rendering and loading layout...</h4>

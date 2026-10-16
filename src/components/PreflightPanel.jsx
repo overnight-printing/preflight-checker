@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import DecimalInput from './DecimalInput';
 import {
   CheckCircle2, 
   AlertTriangle, 
@@ -47,10 +48,8 @@ export default function PreflightPanel({
       </label>
       {requirements.orderSize && ['width', 'height'].map(key => (
         <label className="select-field" key={key}>Order {key} (inches)
-          <input aria-label={`Order ${key} in inches`} type="number" min="0.01" step="0.01" value={Number(((requirements.orderSize?.[key] || 0) / 72).toFixed(4))} onChange={event => {
-            const value = Number(event.target.value);
-            if (Number.isFinite(value) && value > 0) onRequirementsChange({ ...requirements, orderSize: { ...requirements.orderSize, [key]: value * 72 } });
-          }} />
+          <DecimalInput aria-label={`Order ${key} in inches`} min={0.01} precision={4} value={requirements.orderSize[key] / 72}
+            onCommit={inches => onRequirementsChange({ ...requirements, orderSize: { ...requirements.orderSize, [key]: inches * 72 } })} />
         </label>
       ))}
       <label className="select-field">Print workflow

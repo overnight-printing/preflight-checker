@@ -13,6 +13,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import UploadZone from './UploadZone';
+import DecimalInput from './DecimalInput';
 import { parseCustomPageSelection } from '../utils/pageSelection';
 
 const PAGE_ALIGNMENT_ROWS = [
@@ -101,7 +102,6 @@ export default function ControlPanel({
 }) {
   const [activeSection, setActiveSection] = useState('bleed');
   const bleedInches = bleedAmount / 72;
-  const [bleedInput, setBleedInput] = useState(bleedInches.toFixed(3));
 
   const toggleSection = (section) => {
     setActiveSection((current) => current === section ? '' : section);
@@ -112,16 +112,6 @@ export default function ControlPanel({
     const width = ((bugBaseSize.width * bugScale) / 100 / 72).toFixed(2);
     const height = ((bugBaseSize.height * bugScale) / 100 / 72).toFixed(2);
     return `${width}" × ${height}"`;
-  };
-
-  const commitBleedInput = () => {
-    const inches = Number(bleedInput);
-    if (Number.isFinite(inches) && inches > 0) {
-      onBleedAmountChange(inches * 72);
-      setBleedInput(inches.toFixed(3));
-    } else {
-      setBleedInput(bleedInches.toFixed(3));
-    }
   };
 
   return (
@@ -157,26 +147,11 @@ export default function ControlPanel({
           <div className="sub-setting">
             <label className="field-label" htmlFor="bleed-size">Bleed size</label>
             <div className="inline-field">
-              <input
+              <DecimalInput
                 id="bleed-size"
-                type="number"
-                min="0.001"
-                step="0.001"
-                value={bleedInput}
-                onChange={(event) => {
-                  setBleedInput(event.target.value);
-                  const inches = Number(event.target.value);
-                  if (event.target.value !== '' && Number.isFinite(inches) && inches > 0) {
-                    onBleedAmountChange(inches * 72);
-                  }
-                }}
-                onBlur={commitBleedInput}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    commitBleedInput();
-                    event.currentTarget.blur();
-                  }
-                }}
+                min={0.001}
+                value={bleedInches}
+                onCommit={inches => onBleedAmountChange(inches * 72)}
               />
               <span className="field-suffix">in</span>
               <button
@@ -184,7 +159,6 @@ export default function ControlPanel({
                 className="quiet-button"
                 onClick={() => {
                   onBleedAmountChange(9);
-                  setBleedInput('0.125');
                 }}
               >
                 Use 0.125"
@@ -212,16 +186,10 @@ export default function ControlPanel({
             </div>
             <div className="stepper-control">
               <button type="button" aria-label="Decrease crop inset" onClick={() => onManualCropChange(Math.max(0, manualCropAmount - 0.072))}>−</button>
-              <input
+              <DecimalInput
                 id="manual-crop"
-                type="number"
-                min="0"
-                step="0.001"
-                value={(manualCropAmount / 72).toFixed(3)}
-                onChange={(event) => {
-                  const value = Number(event.target.value);
-                  if (Number.isFinite(value)) onManualCropChange(Math.max(0, value) * 72);
-                }}
+                value={manualCropAmount / 72}
+                onCommit={inches => onManualCropChange(inches * 72)}
               />
               <button type="button" aria-label="Increase crop inset" onClick={() => onManualCropChange(manualCropAmount + 0.072)}>+</button>
             </div>
@@ -239,10 +207,7 @@ export default function ControlPanel({
           </label>
         </div>
         <label className="select-field">Safe zone inset (inches)
-          <input aria-label="Safe zone inset in inches" type="number" min="0" step="0.025" value={Number((safeZonePoints / 72).toFixed(4))} onChange={event => {
-            const value = Number(event.target.value);
-            if (Number.isFinite(value) && value >= 0) onSafeZoneChange(value * 72);
-          }} />
+          <DecimalInput aria-label="Safe zone inset in inches" value={safeZonePoints / 72} precision={4} onCommit={inches => onSafeZoneChange(inches * 72)} />
         </label>
       </WorkflowSection>
 

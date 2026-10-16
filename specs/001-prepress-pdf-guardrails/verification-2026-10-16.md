@@ -42,3 +42,11 @@ An older v2.0.11 tab requested `/assets/pdfProcessor-DmVe2dAC.js` after the live
 Added a persistent Vite preload-error banner with explicit refresh instructions, without automatic reload or changes to loaded artwork. Added HTML revalidation headers and a static 404 document to prevent missing modules from receiving SPA HTML on Cloudflare Pages.
 
 `npm run lint`, all 55 unit tests and `npm run build` passed. `verify-module-recovery.cjs` ran against the production preview with deliberately blocked PDF imports: upload failure showed recovery guidance, refresh/reselect loaded the PDF, and a later preflight-module failure retained the canvas and still allowed a real production download. `pdfinfo -box` confirmed 252 × 144 pt boxes; `pdfimages -list` showed no image resources. Inspected the recovery banner screenshot and `pdftoppm` output. Evidence is in `output/audit/module-recovery*`. PDF processing/output code was not changed by this recovery patch.
+
+## Decimal input editing
+
+Bleed, manual crop inset, safe zone and order dimensions now retain local text drafts until blur/Enter; Escape cancels, and invalid drafts restore the prior value. Preview rendering has a separate busy flag so it cannot disable focused controls. Uploads, repairs, scans and exports still lock controls; export waits for the latest preview. Existing render-request cancellation remains in place.
+
+`verify-decimal-inputs.cjs` runs against a production preview (default port 4175). It covers continuous typing with a focus/DOM-identity assertion after every character, leading decimals, middle-of-string edits/caret position, Enter/Tab commits, invalid drafts, Escape, preset synchronization, steppers, oversized-crop recovery, safe zone and order dimensions after an existing preflight result. Its real downloaded vector PDF is expected to be 267.12 × 159.12 pt after 0.020-inch inset and 0.125-inch bleed. Evidence is saved under `output/audit/decimal-inputs*`.
+
+The decimal-input, main browser and compatibility suites passed, alongside lint, all 55 unit tests and the production build. Poppler confirmed 267.12 × 159.12 pt Media/Crop/BleedBoxes, a TrimBox inset by 9 pt, and zero image resources. Visually inspected the field UI and rendered cyan vector export. Safari and mobile-keyboard behavior were not tested.
