@@ -42,6 +42,49 @@ test('eight matching pixel marks propose a trim without guessing from page size'
   assert.equal(detectCropMarks(pixels([...lines, ...second]), 360, 252).status, 'ambiguous');
 });
 
+test('dense corner artwork does not overwhelm marks, including marks touching a dark photo', () => {
+  const preview = pixels(lines);
+  const rectangle = (left, top, width, height) => {
+    for (let y = top * 2; y < (top + height) * 2; y++) for (let x = left * 2; x < (left + width) * 2; x++) {
+      const index = (y * preview.width + x) * 4;
+      preview.data[index] = preview.data[index + 1] = preview.data[index + 2] = 0;
+    }
+  };
+  for (const left of [45, 279]) for (const top of [42, 192]) {
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 6; x++) {
+      rectangle(left + x * 6, top + y * 6, 1, 5);
+      for (const offset of [0, 2, 4]) rectangle(left + x * 6, top + y * 6 + offset, 4, 0.5);
+    }
+  }
+  rectangle(250, 160, 94, 76);
+  const detection = detectCropMarks(preview, 360, 252);
+  assert.equal(detection.status, 'found');
+  for (const inset of Object.values(detection.insets)) assert.ok(Math.abs(inset - 36) < 0.5);
+});
+
+test('thin antialiased marks retain their subpixel center lines', () => {
+  const preview = pixels([]);
+  for (const line of lines) {
+    const horizontal = line.y1 === line.y2;
+    const axis = (horizontal ? line.y1 : line.x1) * 2 + 0.26;
+    const start = Math.min(horizontal ? line.x1 : line.y1, horizontal ? line.x2 : line.y2) * 2;
+    const end = Math.max(horizontal ? line.x1 : line.y1, horizontal ? line.x2 : line.y2) * 2;
+    for (let row = Math.floor(axis - 0.5); row <= Math.ceil(axis + 0.5); row++) {
+      const coverage = Math.max(0, Math.min(row + 1, axis + 0.5) - Math.max(row, axis - 0.5));
+      for (let column = start; column < end; column++) {
+        const index = ((horizontal ? row : column) * preview.width + (horizontal ? column : row)) * 4;
+        preview.data[index] = preview.data[index + 1] = preview.data[index + 2] = Math.round(255 * (1 - coverage));
+      }
+    }
+  }
+  const detection = detectCropMarks(preview, 360, 252);
+  assert.equal(detection.status, 'found');
+  assert.ok(Math.abs(detection.insets.top - 36.13) < 0.01);
+  assert.ok(Math.abs(detection.insets.left - 36.13) < 0.01);
+  assert.ok(Math.abs(360 - detection.insets.left - detection.insets.right - trim.width) < 0.01);
+  assert.ok(Math.abs(252 - detection.insets.top - detection.insets.bottom - trim.height) < 0.01);
+});
+
 test('trim inset mapping round-trips rotations and offset source boxes', () => {
   const crop = { x: 10, y: 20, width: 360, height: 252 };
   const insets = { top: 20, right: 30, bottom: 40, left: 50 };

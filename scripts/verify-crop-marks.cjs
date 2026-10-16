@@ -222,6 +222,36 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
     await page.getByRole('checkbox', { name: 'Add crop marks', exact: true }).uncheck();
     await page.getByRole('button', { name: 'Preflight', exact: true }).click();
     assert.equal(await page.getByText(/Checked production output/).count(), 0);
+    // Optional local customer regression; the private 23 MB artwork is never checked into Git.
+    if (process.env.PREFLIGHT_RMD_SAMPLE) {
+      const original = await PDFDocument.load(fs.readFileSync(process.env.PREFLIGHT_RMD_SAMPLE));
+      await upload().setInputFiles(process.env.PREFLIGHT_RMD_SAMPLE);
+      for (let number = 1; number <= original.getPageCount(); number++) {
+        await review.getByText('Printed crop marks', { exact: true }).waitFor();
+        const suggestion = (await review.innerText()).match(/Suggested trim \(unconfirmed\): ([\d.]+)″ × ([\d.]+)″/);
+        assert.ok(suggestion && Math.abs(Number(suggestion[1]) - 16) < 0.005 && Math.abs(Number(suggestion[2]) - 8.5) < 0.005);
+        await review.getByRole('button', { name: 'Use this trim size', exact: true }).click();
+        await review.getByText('Reviewed trim size', { exact: true }).waitFor();
+        await page.waitForFunction(() => !document.querySelector('.tool-controls').disabled);
+        if (number < original.getPageCount()) await page.getByRole('button', { name: 'Next page', exact: true }).click();
+      }
+      const download = page.waitForEvent('download');
+      await save.click();
+      await (await download).saveAs(out + '/rmd-reviewed.pdf');
+      const reviewed = await PDFDocument.load(fs.readFileSync(out + '/rmd-reviewed.pdf'));
+      assert.equal(reviewed.getPageCount(), original.getPageCount());
+      for (const [index, pdfPage] of reviewed.getPages().entries()) {
+        assert.deepEqual(pdfPage.getMediaBox(), original.getPage(index).getMediaBox());
+        assert.deepEqual(pdfPage.getCropBox(), original.getPage(index).getCropBox());
+        assert.ok(Math.abs(pdfPage.getTrimBox().width - 1152) < 0.2 && Math.abs(pdfPage.getTrimBox().height - 612) < 0.2);
+      }
+      assert.deepEqual(imageStreams(reviewed), imageStreams(original), 'Retain both original CMYK image streams byte for byte');
+      fs.writeFileSync(out + '/rmd-reviewed-verification.txt', execFileSync('pdfinfo', ['-box', out + '/rmd-reviewed.pdf']));
+      fs.appendFileSync(out + '/rmd-reviewed-verification.txt', execFileSync('pdfimages', ['-list', out + '/rmd-reviewed.pdf']));
+      execFileSync('pdftoppm', ['-scale-to', '1400', '-png', out + '/rmd-reviewed.pdf', out + '/rmd-reviewed']);
+      await page.screenshot({ path: out + '/rmd-reviewed-ui.png', fullPage: true });
+      console.log('Actual Canva brochure passed: both trims approximately 16 × 8.5 inches, full page preserved, original CMYK image bytes unchanged.');
+    }
     assert.deepEqual(errors, []);
     console.log('Crop marks passed: raster/vector detection, offsets/rotations, review without cropping, CMYK vector marks, boxes, original resources, UI warning, marks toggle and reset.');
   } finally { await browser.close(); }

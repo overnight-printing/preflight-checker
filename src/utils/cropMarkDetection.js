@@ -3,32 +3,53 @@
 export function detectCropMarks({ data, width, height }, widthPoints, heightPoints) {
   const scaleX = width / widthPoints, scaleY = height / heightPoints;
   if (!data || data.length !== width * height * 4 || ![scaleX, scaleY].every(value => Number.isFinite(value) && value > 0)) throw new Error('Invalid crop-mark preview.');
+  const ink = (x, y) => {
+    const i = (y * width + x) * 4;
+    return (255 - (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2])) * data[i + 3] / 255;
+  };
   const dark = (x, y) => {
     const i = (y * width + x) * 4;
     const r = data[i], g = data[i + 1], b = data[i + 2];
     const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) * data[i + 3] / 255 + 255 - data[i + 3];
     return Math.max(r, g, b) - Math.min(r, g, b) <= 60 && luminance < 180;
   };
+  const white = (x, y) => {
+    const i = (y * width + x) * 4, alpha = data[i + 3] / 255;
+    return Math.min(data[i], data[i + 1], data[i + 2]) * alpha + 255 * (1 - alpha) >= 235;
+  };
   const scan = horizontal => {
     const across = horizontal ? width : height, along = horizontal ? height : width;
     const acrossScale = horizontal ? scaleX : scaleY, alongScale = horizontal ? scaleY : scaleX;
     const minLength = Math.max(2, 3 * acrossScale), maxLength = 36 * acrossScale;
     const tolerance = Math.max(1, acrossScale), maxThickness = Math.max(1, 2 * alongScale);
+    const clearance = Math.max(2, Math.ceil(2 * alongScale));
     let active = [];
     const segments = [];
     const finish = group => {
-      if (group.last - group.first + 1 <= maxThickness) segments.push({
-        axis: (group.first + group.last + 1) / 2 / alongScale,
+      if (group.last - group.first + 1 > maxThickness) return;
+      let weight = 0, center = 0;
+      const column = Math.floor((group.start + group.end) / 2);
+      // Include antialiased edge pixels so thin marks do not snap to a half-point grid.
+      for (let row = Math.max(0, group.first - 1); row <= Math.min(along - 1, group.last + 1); row++) {
+        const value = horizontal ? ink(column, row) : ink(row, column);
+        weight += value; center += (row + 0.5) * value;
+      }
+      segments.push({
+        axis: center / weight / alongScale,
         start: group.start / acrossScale, end: group.end / acrossScale,
       });
     };
     for (let row = 0; row < along; row++) {
       const runs = [];
+      const before = Math.max(0, row - clearance), after = Math.min(along - 1, row + clearance);
       if (row < along * 0.25 || row >= along * 0.75) {
         for (const [from, to] of [[0, Math.floor(across * 0.25)], [Math.ceil(across * 0.75), across]]) {
           let start = -1;
           for (let column = from; column <= to; column++) {
-            const marked = column < to && (horizontal ? dark(column, row) : dark(row, column));
+            // White sides separate printed marks from text/photos, even when a mark touches the artwork.
+            const marked = column < to && (horizontal
+              ? dark(column, row) && white(column, before) && white(column, after)
+              : dark(row, column) && white(before, column) && white(after, column));
             if (marked && start < 0) start = column;
             if (!marked && start >= 0) {
               if (column - start >= minLength && column - start <= maxLength) runs.push({ start, end: column });

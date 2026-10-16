@@ -18,7 +18,13 @@ export async function detectPageCropMarks(page, signal) {
   try {
     await task.promise;
     if (signal.aborted) throw new DOMException('Detection canceled', 'AbortError');
-    return detectCropMarks(context.getImageData(0, 0, canvas.width, canvas.height), canvas.width / scale, canvas.height / scale);
+    const result = detectCropMarks(context.getImageData(0, 0, canvas.width, canvas.height), canvas.width / scale, canvas.height / scale);
+    // Ceil-sized canvases include fractional padding beyond the PDF's right/bottom edges.
+    if (result.insets) {
+      result.insets.right -= canvas.width / scale - size.width;
+      result.insets.bottom -= canvas.height / scale - size.height;
+    }
+    return result;
   } finally {
     signal.removeEventListener('abort', cancel);
     canvas.width = 0; canvas.height = 0;

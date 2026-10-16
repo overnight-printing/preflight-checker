@@ -64,3 +64,13 @@ The PDF-only Add crop marks option is off by default, resets on upload, and work
 - Existing main browser, compatibility-repair and PDF verification suites passed. Rendered UI output and rotated crop/bleed/marks output were visually inspected. Generated PDFs, screenshots and reports are under ignored `output/audit/`.
 
 No actual customer Canva PDF was supplied. Detection remains a reviewable heuristic for axis-aligned dark corner marks; unusual, faint, incomplete or compressed marks may need manual insets. Safari and mobile were not tested.
+
+## Actual Canva brochure regression
+
+The subsequently supplied `RMD Brochure Proof2.pdf` reproduced an ambiguous result on both pages: the old detector admitted 778/764 horizontal/vertical artwork fragments on page 1 and 936/1303 on page 2, exceeding its safety cap. One corner mark also joined dark photo pixels. The fix requires white space beside each candidate stroke before grouping it, separating the real marks from artwork without requiring a white gap at their endpoints. The ambiguity caps remain intact. Ink-weighted centers retain antialiased edge information; right/bottom insets now exclude fractional canvas padding.
+
+The source is two flattened 4942 × 2692 CMYK images at 300 DPI, on 1186.08 × 646.08 pt pages with no distinct TrimBox. The printed mark centers span 4800 × 2550 image pixels: 16 × 8.5 inches. Both pages now propose about 15.999 × 8.499 inches, within 0.1 pt of those spans, without rounding to a guessed order size.
+
+Lint, all 62 unit tests, and the production build passed. The new dense-artwork regression fails with the previous detector and passes with the fix; a second regression checks subpixel centers. The full crop-mark browser/PDF suite passed against the production preview, including the actual brochure via `PREFLIGHT_RMD_SAMPLE='/Users/onp/Downloads/RMD Brochure Proof2.pdf' PREFLIGHT_PRODUCTION_URL=http://127.0.0.1:4175 PLAYWRIGHT_MODULE=/tmp/preflight-browser/node_modules/playwright node scripts/verify-crop-marks.cjs`.
+
+The actual UI confirmed each page's suggested trim without manual edits, downloaded a production PDF, retained both original MediaBox/CropBoxes, and preserved both compressed CMYK image streams byte for byte. Poppler confirmed their original dimensions and 300 DPI; both rendered output PNGs are byte-identical to the source renders. The reviewed UI was visually inspected. Evidence is under ignored `output/audit/rmd-*`; the customer PDF is not committed. Colored or crowded mark margins still need manual review; Safari/mobile were not retested.
