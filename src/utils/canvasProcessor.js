@@ -1,3 +1,5 @@
+import { validateCanvasSize } from './compatibilityGeometry.js';
+
 /**
  * Mathematical Mirror Bleed Draw Engine.
  * Expands a target canvas with mirrored edge reflections on all 4 borders & corners.
@@ -92,43 +94,25 @@ export function drawMirrorBleed(ctx, orig, W, H, B) {
  * @returns {string} Final image DataURL
  */
 export function stitchBugToImage(artworkCanvas, tintedBugCanvas, position, bugSize, bleedPx = 0, bugEnabled = true) {
+  const width = Math.round(artworkCanvas.width + bleedPx * 2);
+  const height = Math.round(artworkCanvas.height + bleedPx * 2);
+  validateCanvasSize(width, height);
   const outputCanvas = document.createElement('canvas');
-
-  if (bleedPx === 0) {
-    outputCanvas.width = artworkCanvas.width;
-    outputCanvas.height = artworkCanvas.height;
+  outputCanvas.width = width;
+  outputCanvas.height = height;
+  try {
     const ctx = outputCanvas.getContext('2d');
-
-    ctx.drawImage(artworkCanvas, 0, 0);
+    if (!ctx) throw new Error('The browser could not allocate the image export canvas.');
+    if (bleedPx === 0) ctx.drawImage(artworkCanvas, 0, 0);
+    else drawMirrorBleed(ctx, artworkCanvas, artworkCanvas.width, artworkCanvas.height, bleedPx);
     if (bugEnabled && tintedBugCanvas) {
       ctx.drawImage(tintedBugCanvas, position.left, position.top, bugSize.width, bugSize.height);
     }
-
-    return outputCanvas.toDataURL('image/png');
+    const data = outputCanvas.toDataURL('image/png');
+    if (!data.startsWith('data:image/png')) throw new Error('The browser could not encode the exported artwork. Use a smaller image or a desktop editor.');
+    return data;
+  } finally {
+    outputCanvas.width = 0;
+    outputCanvas.height = 0;
   }
-
-  // Expanded mirror bleed for image artwork
-  const W = artworkCanvas.width;
-  const H = artworkCanvas.height;
-
-  outputCanvas.width = Math.round(W + (bleedPx * 2));
-  outputCanvas.height = Math.round(H + (bleedPx * 2));
-
-  const ctx = outputCanvas.getContext('2d');
-
-  // Apply mirror bleed on the image canvas
-  drawMirrorBleed(ctx, artworkCanvas, W, H, bleedPx);
-
-  // Overlay the Union Bug if enabled
-  if (bugEnabled && tintedBugCanvas) {
-    ctx.drawImage(
-      tintedBugCanvas,
-      position.left,
-      position.top,
-      bugSize.width,
-      bugSize.height
-    );
-  }
-
-  return outputCanvas.toDataURL('image/png');
 }

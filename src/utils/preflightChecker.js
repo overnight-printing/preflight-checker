@@ -21,7 +21,7 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
   const numPages = pages.length;
   
   const firstPage = pages[0];
-  const firstBox = firstPage ? (firstPage.getTrimBox() || firstPage.getCropBox() || firstPage.getMediaBox() || { x: 0, y: 0, width: 0, height: 0 }) : { x: 0, y: 0, width: 0, height: 0 };
+  const firstBox = firstPage ? (getOrderTrim(firstPage, requirements)?.trim || firstPage.getTrimBox()) : { x: 0, y: 0, width: 0, height: 0 };
   const firstSize = rotatedSize(firstBox, firstPage?.getRotation().angle);
   const firstPageW = firstSize.width;
   const firstPageH = firstSize.height;
@@ -53,6 +53,8 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
       blankPages: { status: 'pass', details: 'No blank pages detected', value: [], fixable: true },
       hiddenLayers: { status: 'pass', details: 'No optional content layers detected', value: null },
       pdfVersionCheck: { status: 'pass', details: `PDF version is ${pdfVersion}`, value: null },
+      contentScan: { status: 'pass', details: 'Content streams were inspected for color, overprint and image resolution.', value: false },
+      orderBoxes: { status: requirements.orderSize ? 'pass' : 'info', details: requirements.orderSize ? 'No order-based box repair proposed.' : 'No order size selected; order-based box repair was not evaluated.', value: [], fixable: false },
       ...getPrintDocumentChecks(pdfDoc, requirements)
     }
   };
@@ -62,6 +64,8 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
   let hasLowRes = false;
   let totalImages = 0;
   let hasInsufficientBleed = false;
+  const missingBleedBoxes = new Map();
+  const registrationPages = new Set();
   let hasOverprint = false;
   let unmeasuredImages = false;
   const nonEmbeddedFonts = new Set();
@@ -175,7 +179,7 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
               const names = lookup(csVal.get(1));
               for (const name of names instanceof PDFArray ? names.asArray() : [names]) {
                 const spotName = name?.toString().replace(/^\//, '');
-                if (spotName && !['All', 'None', 'Cyan', 'Magenta', 'Yellow', 'Black'].includes(spotName)) spotColorsFound.add(spotName);
+                if (spotName && !['Cyan', 'Magenta', 'Yellow', 'Black'].includes(spotName)) spotColorsFound.add(spotName);
               }
             }
           }
@@ -190,8 +194,6 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
     const pageNum = idx + 1;
     
     // Page Size & Bleed
-    const mediaBox = page.getMediaBox() || { x: 0, y: 0, width: 0, height: 0 };
-    const cropBox = page.getCropBox() || mediaBox;
     const orderTrim = getOrderTrim(page, requirements);
     const trimBox = orderTrim?.trim || page.getTrimBox();
     if (orderTrim) orderBoxPages.push(pageNum);
@@ -199,10 +201,10 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
       const size = rotatedSize(trimBox, page.getRotation().angle);
       if (Math.abs(size.width - requirements.orderSize.width) > 0.5 || Math.abs(size.height - requirements.orderSize.height) > 0.5) orderMismatchPages.push(pageNum);
     }
-    const bleedBox = orderTrim?.bleed || page.getBleedBox() || cropBox;
+    const bleedBox = page.getBleedBox();
     
     // Compare CropBox/TrimBox width & height with the first page
-    const compareBox = rotatedSize(trimBox || cropBox, page.getRotation().angle);
+    const compareBox = rotatedSize(trimBox, page.getRotation().angle);
     const widthDiff = Math.abs(compareBox.width - firstPageW);
     const heightDiff = Math.abs(compareBox.height - firstPageH);
     if (widthDiff > 3.0 || heightDiff > 3.0) {
@@ -220,14 +222,14 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
     // Bleed calculation
     if (requirements.bleedPoints === 0) {
       // Bleed is a job requirement; some products do not require it.
-    } else if (!trimBox) {
-      hasInsufficientBleed = true; // Missing TrimBox = no bleed defined
     } else {
-      const margins = [trimBox.x - bleedBox.x, trimBox.y - bleedBox.y,
-        bleedBox.x + bleedBox.width - trimBox.x - trimBox.width,
-        bleedBox.y + bleedBox.height - trimBox.y - trimBox.height];
-      if (margins.some(value => value < requirements.bleedPoints - 0.1)) {
-        hasInsufficientBleed = true;
+      const missing = ['TrimBox', 'BleedBox'].filter(name => !page.node.has(PDFName.of(name)));
+      if (missing.length) missingBleedBoxes.set(pageNum, missing.join(' and '));
+      else {
+        const margins = [trimBox.x - bleedBox.x, trimBox.y - bleedBox.y,
+          bleedBox.x + bleedBox.width - trimBox.x - trimBox.width,
+          bleedBox.y + bleedBox.height - trimBox.y - trimBox.height];
+        if (margins.some(value => value < requirements.bleedPoints - 0.1)) hasInsufficientBleed = true;
       }
     }
 
@@ -238,6 +240,7 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
       if (scan.whiteOverprint) whiteOverprintPages.add(pageNum);
       hasOverprint ||= scan.overprint;
       hasTransparency ||= scan.transparency;
+      if (scan.registration) registrationPages.add(pageNum);
       const xObjects = lookup(resourceDict.get(PDFName.of('XObject')));
       if (!(xObjects instanceof PDFDict)) return;
       for (const draw of scan.draws) {
@@ -297,30 +300,31 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
   if (hasInsufficientBleed) {
     results.checks.bleed = {
       status: 'error',
-      details: `Bleed is below the job target (${(requirements.bleedPoints / 72).toFixed(3)}" each edge) or the finished TrimBox is missing. Confirm edge artwork extends beyond the cut line.`,
+      details: `Explicit bleed is below the job target (${(requirements.bleedPoints / 72).toFixed(3)}" each edge). Confirm edge artwork extends beyond the cut line.`,
       value: false,
       fixable: true
     };
+  }
+  if (missingBleedBoxes.size) {
+    const details = `Missing explicit ${[...missingBleedBoxes].map(([page, names]) => `${names} on page ${page}`).join('; ')}. Bleed cannot be verified from fallback boxes; confirm the cut line and edge artwork.`;
+    if (hasInsufficientBleed) results.checks.bleed.details += ` ${details}`;
+    else results.checks.bleed = { status: 'warning', details: `Review required: ${details}`, value: null, fixable: true };
   }
 
   if (orderBoxPages.length) results.checks.orderBoxes = { status: 'warning', details: `Page bounds match the explicitly selected order size plus bleed on pages ${orderBoxPages.join(', ')}. Set finished boxes after confirming the centered cut line and edge artwork.`, value: orderBoxPages, fixable: true };
 
   // Update Image Resolution Status
-  if (minDPI < 150) {
-    results.checks.resolution = { status: 'error', details: `Images below 150 DPI detected. Minimum: ${Math.round(minDPI)} DPI; job target: ${requirements.minDpi} DPI.${unmeasuredImages ? ' Other images could not be measured.' : ''}`, value: Math.round(minDPI) };
-  } else if (unmeasuredImages) {
-    results.checks.resolution = { status: 'warning', details: 'Some inline images or unsupported image resources could not be measured. Verify their effective resolution in a production PDF editor.', value: Number.isFinite(minDPI) ? Math.round(minDPI) : null };
+  if (hasLowRes || minDPI < 150) {
+    results.checks.resolution = {
+      status: hasLowRes ? 'error' : 'warning',
+      details: `Low resolution images detected. Minimum found: ${Math.round(minDPI)} DPI; job target: ${requirements.minDpi} DPI.${minDPI < 150 ? ' Images below the 150 DPI quality floor may appear visibly pixelated.' : ''} Re-export from higher-resolution source artwork.`,
+      value: Math.round(minDPI)
+    };
   } else if (totalImages === 0) {
     results.checks.resolution = {
       status: 'pass',
       details: 'No images detected in document (vector only).',
       value: null
-    };
-  } else if (hasLowRes) {
-    results.checks.resolution = {
-      status: 'warning',
-      details: `Low resolution images detected. Minimum found: ${Math.round(minDPI)} DPI; job target: ${requirements.minDpi} DPI. Re-export from higher-resolution source artwork.`,
-      value: Math.round(minDPI)
     };
   } else {
     results.checks.resolution = {
@@ -328,6 +332,14 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
       details: `All measured images meet the ${requirements.minDpi} DPI job target. Minimum: ${Math.round(minDPI)} DPI.`,
       value: Math.round(minDPI)
     };
+  }
+  if (unmeasuredImages) {
+    if (results.checks.resolution.status === 'pass') results.checks.resolution.status = 'warning';
+    if (!Number.isFinite(minDPI)) {
+      results.checks.resolution.details = '';
+      results.checks.resolution.value = null;
+    }
+    results.checks.resolution.details += ' Some inline images or unsupported image resources could not be measured. Verify their effective resolution in a production PDF editor.';
   }
 
   // Update Overprint Status
@@ -384,7 +396,9 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
   }
 
   if (requirements.orderSize) {
-    results.checks.pageSize = { status: orderMismatchPages.length ? 'error' : 'pass', details: orderMismatchPages.length ? `Finished size differs from the order on pages ${orderMismatchPages.join(', ')}.` : 'All finished page sizes match the order (0.5 pt tolerance).', value: orderMismatchPages };
+    if (orderMismatchPages.length) results.checks.pageSize.status = 'error';
+    results.checks.pageSize.details += orderMismatchPages.length ? ` Finished size differs from the order on pages ${orderMismatchPages.join(', ')}.` : ' All finished page sizes match the order (0.5 pt tolerance).';
+    results.checks.pageSize.orderMismatchPages = orderMismatchPages;
   }
   if (incompleteContent) results.checks.contentScan = { status: 'warning', details: 'Some content streams or recursive resources could not be inspected. Color, overprint and resolution results may be incomplete; review in a production PDF editor.', value: true };
 
@@ -415,8 +429,8 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
   // Update Spot Colors Status
   if (spotColorsFound.size > 0) {
     results.checks.spotColors = {
-      status: 'info',
-      details: `Spot inks: ${Array.from(spotColorsFound).join(', ')}. Confirm these plates are intended; convert unwanted spots using the printer's color-managed workflow.`,
+      status: registrationPages.size ? 'error' : spotColorsFound.has('All') ? 'warning' : 'info',
+      details: `Spot inks: ${Array.from(spotColorsFound).join(', ')}. Confirm these plates are intended; convert unwanted spots using the printer's color-managed workflow.${spotColorsFound.has('All') ? ` Registration color (/All) prints on every plate.${registrationPages.size ? ` Painted registration artwork on pages ${[...registrationPages].join(', ')} is not identified as printer marks; correct artwork or verify marks in a production PDF editor.` : ' Confirm registration is limited to printer marks.'}` : ''}${spotColorsFound.has('None') ? ' /None prints nothing; confirm invisible artwork is intentional.' : ''}`,
       value: Array.from(spotColorsFound),
       fixable: false
     };

@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  browser:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PREFLIGHT_BASE_URL: http://127.0.0.1:5173
+      PREFLIGHT_PRODUCTION_URL: http://127.0.0.1:4173/overnight-preflight-tool/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chrome
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - run: npm run build
+      - name: Verify browser behavior and PDF output
+        run: |
+          env -u GITHUB_ACTIONS npm run dev -- --host 127.0.0.1 --port 5173 --strictPort > /tmp/preflight-dev.log 2>&1 &
+          DEV_PID=$!
+          npm run preview -- --host 127.0.0.1 --port 4173 --strictPort > /tmp/preflight-preview.log 2>&1 &
+          PREVIEW_PID=$!
+          trap 'kill "$DEV_PID" "$PREVIEW_PID"' EXIT
+          for URL in "$PREFLIGHT_BASE_URL" "$PREFLIGHT_PRODUCTION_URL"; do
+            curl --fail --retry 20 --retry-connrefused --retry-delay 1 "$URL" > /dev/null
+          done
+          npm run test:browser
+          npm run verify:pdf
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: preflight-verification
+          path: |
+            output/audit/
+            /tmp/preflight-dev.log
+            /tmp/preflight-preview.log
+
+  bump-patch-version:
+    needs: [checks, browser]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/auto-version.yml

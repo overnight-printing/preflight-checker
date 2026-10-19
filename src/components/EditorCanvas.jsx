@@ -17,8 +17,6 @@ export default function EditorCanvas({
   bleedAmount = 9.0,    // Added mirror bleed in PDF points
   trimCropEnabled = false,
   manualCropAmount = 0,
-  isCropMode = false,
-  manualCropGuides = { top: 0, right: 0, bottom: 0, left: 0 },
   bugEnabled = true, // Toggle to show/hide bug overlay
   showGrid = false,
   snapToGrid = false,
@@ -68,12 +66,10 @@ export default function EditorCanvas({
     ? Math.max(0, (pdfBoxInfo.trimInsets.bottom - manualCropAmount) * canvasScale)
     : 0;
 
-  // Visual crop guides override metadata because they represent the user's
-  // chosen physical cut line. The current canvas is not cropped a second time.
-  const cropLeftPx = isCropMode ? manualCropGuides.left : metadataLeftPx;
-  const cropTopPx = isCropMode ? manualCropGuides.top : metadataTopPx;
-  const cropRightPx = isCropMode ? manualCropGuides.right : metadataRightPx;
-  const cropBottomPx = isCropMode ? manualCropGuides.bottom : metadataBottomPx;
+  const cropLeftPx = metadataLeftPx;
+  const cropTopPx = metadataTopPx;
+  const cropRightPx = metadataRightPx;
+  const cropBottomPx = metadataBottomPx;
 
   const trimLeftPx = virtualBleedPx + cropLeftPx;
   const trimTopPx = virtualBleedPx + cropTopPx;
@@ -348,24 +344,6 @@ export default function EditorCanvas({
                     border: '2px dashed #00c7e8',
                     pointerEvents: 'none',
                     zIndex: 2,
-                    boxSizing: 'border-box'
-                  }}
-                />
-             )}
-
-             {/* 3. Interactive Crop Mode Overlay */}
-             {isCropMode && (
-                <div 
-                  style={{
-                    position: 'absolute',
-                    top: `${manualCropGuides.top}px`,
-                    left: `${manualCropGuides.left}px`,
-                    width: `${canvasWidth - manualCropGuides.left - manualCropGuides.right}px`,
-                    height: `${canvasHeight - manualCropGuides.top - manualCropGuides.bottom}px`,
-                    border: '2px solid #f59e0b', // Orange crop box
-                    boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.5)', // Dim outside area
-                    pointerEvents: 'none',
-                    zIndex: 3,
                     boxSizing: 'border-box'
                   }}
                 />

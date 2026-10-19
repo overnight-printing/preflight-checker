@@ -8,7 +8,9 @@
     "build": "vite build",
     "lint": "eslint .",
     "test": "node --test",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:browser": "node scripts/verify-browser.cjs && node scripts/verify-compatibility.cjs && node scripts/verify-crop-marks.cjs && node scripts/verify-decimal-inputs.cjs && node scripts/verify-module-recovery.cjs",
+    "verify:pdf": "python3 scripts/verify-pdf.py"
   },
   "dependencies": {
     "lucide-react": "^1.16.0",
@@ -27,6 +29,7 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
     "jimp": "^1.6.1",
+    "playwright": "1.64.1",
     "vite": "^8.0.12"
   }
 }

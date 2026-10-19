@@ -41,13 +41,18 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
     PDFOperator.of('Do', [PDFName.of('Stencil')]), PDFOperator.of('Q'));
   page.drawText('Gradient + masked artwork', { x: 12, y: 120, size: 12, font: await source.embedFont(StandardFonts.Helvetica), color: rgb(0, 0, 0) });
   fs.writeFileSync(out + '/compatibility-source.pdf', await source.save());
+  const unitSource = await PDFDocument.create();
+  const unitPage = unitSource.addPage([36, 18]);
+  unitPage.node.set(PDFName.of('UserUnit'), unitSource.context.obj(10));
+  unitPage.drawRectangle({ width: 36, height: 18, color: rgb(0.1, 0.3, 0.8) });
+  fs.writeFileSync(out + '/user-unit.pdf', await unitSource.save());
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   const browserPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
   browserPage.on('pageerror', error => errors.push(error.message));
   try {
     await browserPage.goto(process.env.PREFLIGHT_BASE_URL || 'http://127.0.0.1:5173');
-    for (const [name, dpi] of [['compatibility-source', 300], ['compatibility-source', 600], ['rotated', 600], ['layers', 300], ['multi', 300]]) {
+    for (const [name, dpi] of [['compatibility-source', 300], ['compatibility-source', 600], ['rotated', 600], ['layers', 300], ['multi', 300], ['user-unit', 300]]) {
       console.log(`VERIFY compatibility ${name} ${dpi} DPI`);
       const input = [...fs.readFileSync(out + '/' + name + '.pdf')];
       const result = await browserPage.evaluate(async ({ input, name, dpi }) => {
@@ -258,6 +263,18 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
       fs.writeFileSync(`${out}/${name}-verification.txt`, info + '\n' + images);
       execFileSync('pdftoppm', ['-scale-to', '1100', '-png', filename, `${out}/${name}`]);
     }
+    // Poppler's DPI listing does not apply UserUnit; verify physical DPI from
+    // the emitted image dimensions and the retained page unit explicitly.
+    const unitOutput = await PDFDocument.load(fs.readFileSync(out + '/user-unit-300dpi.pdf'));
+    const unitTarget = unitOutput.getPage(0);
+    const unitObjects = unitTarget.node.Resources().lookup(PDFName.of('XObject'));
+    const unitImage = unitObjects.lookup(unitObjects.keys()[0]);
+    const unit = unitTarget.node.get(PDFName.of('UserUnit')).asNumber();
+    assert.equal(unitImage.dict.get(PDFName.of('Width')).asNumber() / (unitTarget.getWidth() * unit / 72), 300);
+    fs.writeFileSync(out + '/user-unit-300dpi-verification.txt',
+      execFileSync('pdfinfo', ['-box', out + '/user-unit-300dpi.pdf'], { encoding: 'utf8' }) + '\n' +
+      execFileSync('pdfimages', ['-list', out + '/user-unit-300dpi.pdf'], { encoding: 'utf8' }) + '\nEffective physical DPI: 300 (UserUnit 10)\n');
+    execFileSync('pdftoppm', ['-scale-to', '1100', '-png', out + '/user-unit-300dpi.pdf', out + '/user-unit-300dpi']);
     execFileSync('pdftoppm', ['-scale-to', '1100', '-png', out + '/compatibility-source.pdf', out + '/compatibility-source']);
     const bleedPdf = await PDFDocument.load(fs.readFileSync(out + '/ui-job-bleed.pdf'));
     const bleedPage = bleedPdf.getPage(0), required = 5 * 72 / 25.4;

@@ -62,3 +62,39 @@ test('source cache reads once and keeps editing copies separate; encryption has 
   const encrypted = new File([await doc.save()], 'encrypted.pdf');
   await assert.rejects(getPdfDocument(encrypted), /encrypted or password protected.*unencrypted/);
 });
+
+test('painted registration is distinguished from unused resources, None and explicitly tagged printer marks', async () => {
+  const doc = await PDFDocument.create();
+  const resources = doc.context.obj({ ColorSpace: {
+    Reg: ['Separation', 'All', 'DeviceCMYK', {}], Invisible: ['Separation', 'None', 'DeviceCMYK', {}],
+    Multi: ['DeviceN', ['Cyan', 'All'], 'DeviceCMYK', {}]
+  } });
+  const scan = text => scanContent(text, resources, value => doc.context.lookup(value));
+  assert.equal(scan('/Reg cs 1 scn').registration, false);
+  assert.equal(scan('/Reg cs 1 scn 0 0 10 10 re f').registration, true);
+  assert.equal(scan('/Reg CS 1 SCN 0 0 m 10 10 l S').registration, true);
+  assert.equal(scan('/Multi cs 0 1 scn (text) Tj').registration, true);
+  assert.equal(scan('/Invisible cs 1 scn 0 0 10 10 re f').registration, false);
+  assert.equal(scan('/Reg cs 1 scn 3 Tr (invisible) Tj').registration, false);
+  assert.equal(scan('/Artifact << /Subtype /PrinterMark >> BDC /Reg CS 1 SCN 0 0 m 10 10 l S EMC').registration, false);
+  assert.equal(scan('/Artifact << /Subtype /PrinterMark >> BDC EMC /Reg cs 1 scn (art) Tj').registration, true);
+});
+
+test('printer-mark tags resolve named properties and cannot be forged by dictionary strings', async () => {
+  const doc = await PDFDocument.create();
+  const resources = doc.context.obj({ ColorSpace: { Reg: ['Separation', 'All', 'DeviceCMYK', {}] },
+    Properties: { Mark: { Subtype: 'PrinterMark' } } });
+  const scan = text => scanContent(text, resources, value => doc.context.lookup(value));
+  assert.equal(scan('/Artifact /Mark BDC /Reg cs 1 scn 0 0 10 10 re f EMC').registration, false);
+  assert.equal(scan('/Artifact << /Note (/Subtype /PrinterMark) >> BDC /Reg cs 1 scn (art) Tj EMC').registration, true);
+});
+
+test('registration color inherited into a Form survives its different resource dictionary', async () => {
+  const doc = await PDFDocument.create();
+  const resources = doc.context.obj({ ColorSpace: { Reg: ['Separation', 'All', 'DeviceCMYK', {}] } });
+  const lookup = value => doc.context.lookup(value);
+  const parent = scanContent('/Reg cs 1 scn /Form Do', resources, lookup);
+  const child = scanContent('0 0 10 10 re f', doc.context.obj({}), lookup, parent.draws[0].state);
+  assert.equal(child.registration, true);
+  assert.equal(scanContent('0 0 0 1 k 0 0 10 10 re f', resources, lookup, parent.draws[0].state).registration, false);
+});
