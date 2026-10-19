@@ -66,3 +66,17 @@ test('distinguishes missing finished trim from invalid boxes and reports annotat
   assert.equal(checks.interactiveContent.status, 'warning');
   assert.equal(checks.pageUnits.status, 'warning');
 });
+
+test('viewer CropBox may clip an explicit TrimBox without invalidating media-contained boxes', async () => {
+  const document = await PDFDocument.create();
+  const page = document.addPage([270, 162]);
+  page.setCropBox(18, 18, 234, 126);
+  page.setTrimBox(9, 9, 252, 144);
+  let check = getPrintDocumentChecks(document).pageGeometry;
+  assert.equal(check.status, 'info');
+  assert.match(check.details, /CropBox clips.*pages 1/);
+  page.setBleedBox(0, 0, 270, 162);
+  assert.equal(getPrintDocumentChecks(document).pageGeometry.status, 'info');
+  page.setArtBox(0, 0, 300, 162);
+  assert.equal(getPrintDocumentChecks(document).pageGeometry.status, 'error');
+});

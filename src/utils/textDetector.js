@@ -37,7 +37,6 @@ export async function findDisclaimerInPDF(pdfPage) {
     const items = textContent.items;
     
     if (!items || items.length === 0) {
-      console.log('No text items found on this PDF page. Outlined or scanned PDF?');
       return null;
     }
     
@@ -77,8 +76,6 @@ export async function findDisclaimerInPDF(pdfPage) {
       // This solves issues where spaces are missing or characters are segmented in PDF data.
       const cleanLineText = fullText.toLowerCase().replace(/\s+/g, '');
       
-      // Print to console to assist in manual debugging
-      console.log(`[PDF Text Line] Y: ${y}pt | Width: ${lineItems.length} items | Text: "${fullText}" | Cleaned: "${cleanLineText}"`);
       
       // Match keywords using space-free matching
       const isMatch = DISCLAIMER_KEYWORDS.some(keyword => {
@@ -108,12 +105,6 @@ export async function findDisclaimerInPDF(pdfPage) {
           };
         }
       }
-    }
-    
-    if (bestMatch) {
-      console.log('Detected Disclaimer Match:', bestMatch);
-    } else {
-      console.log('No disclaimer keywords matched in the parsed text lines.');
     }
     
     return bestMatch;

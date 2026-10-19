@@ -34,9 +34,11 @@ import {
   translatePositionForBleed
 } from './utils/layoutMath';
 import { getOutputGeometry, rotatedSize } from './utils/pdfGeometry';
-import { validateArtworkFile, MAX_PDF_BYTES } from './utils/fileValidation';
+import { validateArtworkFile, validateRasterArtwork, MAX_PDF_BYTES } from './utils/fileValidation';
 import { normalizeProofId, proofIdForFilename } from './utils/proofId';
 import { DEFAULT_PRINT_REQUIREMENTS } from './utils/printSettings';
+
+import { validateCanvasSize } from './utils/compatibilityGeometry.js';
 
 import './App.css';
 
@@ -46,7 +48,12 @@ const loadImageElement = (file) => {
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
-      img.onload = () => resolve(img);
+      img.onload = () => {
+        try {
+          validateCanvasSize(img.naturalWidth, img.naturalHeight);
+          resolve(img);
+        } catch (error) { reject(error); }
+      };
       img.onerror = reject;
       img.src = event.target.result;
     };
@@ -146,8 +153,6 @@ export default function App() {
   const [cropMarkReviews, setCropMarkReviews] = useState({});
   const [trimCropEnabled, setTrimCropEnabled] = useState(false); // New non-destructive crop toggle
   const [manualCropAmount, setManualCropAmount] = useState(0); // Manual inset in points (72pt = 1 inch)
-  const [isCropMode] = useState(false); // Interactive visual crop mode disabled
-  const [manualCropGuides] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
 
   const [originalImage, setOriginalImage] = useState(null); // Keeps the original Image element for reactive image bleed redraws
 
@@ -444,6 +449,8 @@ export default function App() {
         setPdfDoc(null);
         setTotalPages(1);
         setCurrentPage(1);
+        await validateRasterArtwork(file);
+        controller.signal.throwIfAborted();
         const img = await loadImageElement(file);
         if (requestId !== artworkLoadRequestIdRef.current) return;
         setOriginalImage(img);
@@ -614,6 +621,7 @@ export default function App() {
     const finalH = sourceH - cropTop - cropBottom;
     if (finalW <= 0 || finalH <= 0) throw new Error('The crop inset removes the entire page. Reduce the manual inset.');
     const bleedPx = Math.round((bleed ? selectedBleedAmount : 0) * canvasScale);
+    validateCanvasSize(Math.round(finalW + bleedPx * 2), Math.round(finalH + bleedPx * 2));
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(finalW + (bleedPx * 2));
     canvas.height = Math.round(finalH + (bleedPx * 2));
@@ -941,7 +949,7 @@ export default function App() {
           bottom: Math.max(0, (pdfBoxInfo.trimInsets.bottom - manualCropAmount) * canvasScale)
         }
       : { left: 0, right: 0, top: 0, bottom: 0 };
-    const cropInsets = isCropMode ? manualCropGuides : metadataInsets;
+    const cropInsets = metadataInsets;
     const safeInsetPx = safeZonePoints * canvasScale;
     const safeLeftPx = virtualBleedPx + cropInsets.left + safeInsetPx;
     const safeTopPx = virtualBleedPx + cropInsets.top + safeInsetPx;
@@ -955,7 +963,7 @@ export default function App() {
     );
 
     return { left: safeLeftPx, top: safeTopPx, width: safeWidthPx, height: safeHeightPx };
-  }, [artworkCanvas, effectiveBleedAmount, canvasScale, pdfBoxInfo, trimCropEnabled, manualCropAmount, isCropMode, manualCropGuides, safeZonePoints]);
+  }, [artworkCanvas, effectiveBleedAmount, canvasScale, pdfBoxInfo, trimCropEnabled, manualCropAmount, safeZonePoints]);
 
   // 6. Quick Alignment Logic
   const handleQuickAlign = useCallback((alignment) => {
@@ -1150,7 +1158,7 @@ export default function App() {
       exportSizes,
       trimCropEnabled,
       manualCropAmount,
-      isCropMode,
+      false,
       { cropMarksEnabled }
     );
   };
@@ -1414,8 +1422,6 @@ export default function App() {
                 bleedAmount={effectiveBleedAmount}
                 trimCropEnabled={trimCropEnabled}
                 manualCropAmount={manualCropAmount}
-                isCropMode={isCropMode}
-                manualCropGuides={manualCropGuides}
                 bugEnabled={bugEnabled && pageSelection.pages.includes(currentPage)}
                 showGrid={showGrid}
                 snapToGrid={snapToGrid}

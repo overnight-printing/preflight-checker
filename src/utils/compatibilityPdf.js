@@ -12,11 +12,14 @@ export async function createCompatibilityArtworkPdf(file, pdfjsDocument, dpi = 6
   if (!selected.size || [...selected].some(number => !Number.isInteger(number) || number < 1 || number > pages.length)) throw new Error('Choose valid pages to flatten.');
   const partial = selected.size < pages.length;
   let totalPixels = 0;
-  for (const [index, page] of pages.entries()) {
+  const renderPages = new Map();
+  for (const index of pages.keys()) {
     if (!selected.has(index + 1)) continue;
-    const unit = source.context.lookup(page.node.get(PDFName.of('UserUnit')))?.asNumber?.() || 1;
-    const box = page.getCropBox();
-    const size = getCompatibilityRenderSize({ width: box.width * unit, height: box.height * unit }, dpi);
+    const renderedPage = await pdfjsDocument.getPage(index + 1);
+    // PDF.js already applies UserUnit and intersects CropBox with MediaBox.
+    const viewport = renderedPage.getViewport({ scale: dpi / 72, rotation: 0 });
+    const size = getCompatibilityRenderSize({ width: viewport.width * 72 / dpi, height: viewport.height * 72 / dpi }, dpi);
+    renderPages.set(index, { renderedPage, viewport, size });
     totalPixels += size.width * size.height;
   }
   if (totalPixels > 120_000_000) throw new Error('This document is too large to flatten in browser memory. Choose 300 DPI or use a desktop transparency flattener.');
@@ -32,9 +35,7 @@ export async function createCompatibilityArtworkPdf(file, pdfjsDocument, dpi = 6
   }
   for (const [index, page] of pages.entries()) {
     if (!selected.has(index + 1)) continue;
-    const renderedPage = await pdfjsDocument.getPage(index + 1);
-    const viewport = renderedPage.getViewport({ scale: dpi / 72, rotation: 0 });
-    const size = getCompatibilityRenderSize({ width: viewport.width * 72 / dpi, height: viewport.height * 72 / dpi }, dpi);
+    const { renderedPage, viewport, size } = renderPages.get(index);
     const canvas = document.createElement('canvas');
     canvas.width = size.width;
     canvas.height = size.height;

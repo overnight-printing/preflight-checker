@@ -505,15 +505,19 @@ npm run lint
 npm run build
 ```
 
-The browser regression script creates its own fixtures and downloads real app exports. It needs a running development server, Chrome, and Playwright (installed separately from application dependencies):
+The browser checks create fixtures and download real app exports. Playwright is a development dependency; install its Chrome browser, then run a development server on port 5173 and a production preview on port 4173 in separate terminals:
 
 ```bash
-npm install --prefix /tmp/preflight-browser playwright
-PLAYWRIGHT_MODULE=/tmp/preflight-browser/node_modules/playwright node scripts/verify-browser.cjs
-python3 scripts/verify-pdf.py
-PLAYWRIGHT_MODULE=/tmp/preflight-browser/node_modules/playwright node scripts/verify-compatibility.cjs
-PLAYWRIGHT_MODULE=/tmp/preflight-browser/node_modules/playwright node scripts/verify-crop-marks.cjs
+npx playwright install chrome
+npm run dev
+# In another terminal, after npm run build:
+npm run preview
+# In a third terminal:
+PREFLIGHT_PRODUCTION_URL=http://127.0.0.1:4173 npm run test:browser
+npm run verify:pdf
 ```
+
+CI runs installation, lint, unit tests and build on pull requests and pushes to main. A separate browser job runs all five Playwright scripts and Poppler checks, and uploads the verification output. Only a successful main run can call the patch-version workflow; it bumps only the verified commit and skips it if main has since advanced.
 
 Outputs, screenshots, and Poppler inspection files are saved under `output/audit/` (ignored by Git). Set `PREFLIGHT_BASE_URL` to change the development-server URL or `PREFLIGHT_AUDIT_OUTPUT` to change the output folder. The PDF verification script requires `pdfinfo`, `pdfimages`, and `pdftoppm`. Visually inspect the rendered PDFs after the automated checks.
 

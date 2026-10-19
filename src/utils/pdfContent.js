@@ -57,26 +57,54 @@ export function multiplyLinearMatrices(parent, local) {
 }
 
 export function scanContent(text, resources, lookup, initialState = {}) {
-  const stack = [], draws = [];
+  const stack = [], draws = [], markedContent = [];
   let state = { matrix: [1, 0, 0, 1], fill: false, stroke: false, op: false, OP: false, textMode: 0, ...initialState };
-  let rgb = false, whiteOverprint = false, overprint = false, transparency = false;
+  let rgb = false, whiteOverprint = false, overprint = false, transparency = false, registration = false;
+  const isRegistration = name => {
+    const spaces = resources instanceof PDFDict && lookup(resources.get(PDFName.of('ColorSpace')));
+    const space = spaces instanceof PDFDict && typeof name === 'string' && lookup(spaces.get(PDFName.of(name.slice(1))));
+    if (!(space instanceof PDFArray)) return false;
+    const names = lookup(space.get(1));
+    return ['/Separation', '/DeviceN'].includes(space.get(0)?.toString()) &&
+      (names instanceof PDFArray ? names.asArray().map(lookup) : [names]).some(value => value === PDFName.of('All'));
+  };
+  const isPrinterMark = (args, source) => {
+    if (args[0] !== '/Artifact') return false;
+    if (typeof args[1] === 'string') {
+      const properties = resources instanceof PDFDict && lookup(resources.get(PDFName.of('Properties')));
+      const property = properties instanceof PDFDict && lookup(properties.get(PDFName.of(args[1].slice(1))));
+      return property instanceof PDFDict && lookup(property.get(PDFName.of('Subtype'))) === PDFName.of('PrinterMark');
+    }
+    const dictionary = source.match(/^\/Artifact\s*<<([\s\S]*)>>\s*BDC$/)?.[1];
+    if (!dictionary) return false;
+    const properties = [...contentOperators(`${dictionary} BDC`)].at(-1)?.args || [];
+    return properties.some((name, index) => index % 2 === 0 && name === '/Subtype' && properties[index + 1] === '/PrinterMark');
+  };
   const paint = (fill, stroke) => {
     overprint ||= (fill && state.op) || (stroke && state.OP);
     whiteOverprint ||= (fill && state.fill && state.op) || (stroke && state.stroke && state.OP);
+    registration ||= !state.printerMark && ((fill && state.fillRegistration) || (stroke && state.strokeRegistration));
   };
-  for (const { operator, args } of contentOperators(text)) {
+  for (const { operator, args, start, end } of contentOperators(text)) {
     if (operator === 'q') stack.push({ ...state });
     else if (operator === 'Q') state = stack.pop() || state;
+    else if (operator === 'BDC' || operator === 'BMC') {
+      markedContent.push(state.printerMark);
+      // Only explicitly tagged printer marks are exempt; untagged /All needs review.
+      state.printerMark ||= isPrinterMark(args, text.slice(start, end));
+    } else if (operator === 'EMC') state.printerMark = markedContent.pop();
     else if (operator === 'cm' && args.length === 6 && args.every(Number.isFinite)) state.matrix = multiplyLinearMatrices(state.matrix, args);
     else if (['g', 'G', 'rg', 'RG', 'k', 'K'].includes(operator)) {
       const fill = operator === operator.toLowerCase();
       const space = { g: '/DeviceGray', rg: '/DeviceRGB', k: '/DeviceCMYK' }[operator.toLowerCase()];
       state[fill ? 'fillSpace' : 'strokeSpace'] = space;
+      state[fill ? 'fillRegistration' : 'strokeRegistration'] = false;
       state[fill ? 'fill' : 'stroke'] = space === '/DeviceCMYK' ? args.length === 4 && args.every(n => n === 0)
         : args.length === (space === '/DeviceGray' ? 1 : 3) && args.every(n => n === 1);
       rgb ||= space === '/DeviceRGB';
     } else if (operator === 'cs' || operator === 'CS') {
       state[operator === 'cs' ? 'fillSpace' : 'strokeSpace'] = args[0];
+      state[operator === 'cs' ? 'fillRegistration' : 'strokeRegistration'] = isRegistration(args[0]);
       state[operator === 'cs' ? 'fill' : 'stroke'] = false;
       rgb ||= args[0] === '/DeviceRGB';
     } else if (['sc', 'SC', 'scn', 'SCN'].includes(operator)) {
@@ -103,5 +131,5 @@ export function scanContent(text, resources, lookup, initialState = {}) {
     else if (['B', 'B*', 'b', 'b*'].includes(operator)) paint(true, true);
     else if (['Tj', 'TJ', "'", '"'].includes(operator)) paint([0, 2, 4, 6].includes(state.textMode), [1, 2, 5, 6].includes(state.textMode));
   }
-  return { draws, rgb, overprint, whiteOverprint, transparency };
+  return { draws, rgb, overprint, whiteOverprint, transparency, registration };
 }

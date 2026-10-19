@@ -10,12 +10,13 @@ const inside = (inner, outer) => inner.x >= outer.x - 0.1 && inner.y >= outer.y 
 export function getPrintDocumentChecks(document, requirements = {}) {
   const { workflow } = normalizePrintRequirements(requirements);
   const checks = {};
-  const invalidPages = [], missingTrimPages = [], annotationPages = [], unitPages = [];
+  const invalidPages = [], missingTrimPages = [], clippedTrimPages = [], annotationPages = [], unitPages = [];
   for (const [index, page] of document.getPages().entries()) {
     const number = index + 1;
     const media = page.getMediaBox(), crop = page.getCropBox(), trim = page.getTrimBox(), bleed = page.getBleedBox();
-    if (![media, crop, trim, bleed].every(box => Object.values(box).every(Number.isFinite) && box.width > 0 && box.height > 0) ||
-        !inside(crop, media) || !inside(trim, crop) || !inside(bleed, media) || !inside(trim, bleed)) invalidPages.push(number);
+    const art = page.getArtBox();
+    if (![media, crop, trim, bleed, art].every(box => Object.values(box).every(Number.isFinite) && box.width > 0 && box.height > 0 && inside(box, media))) invalidPages.push(number);
+    if (page.node.has(PDFName.of('TrimBox')) && !inside(trim, crop)) clippedTrimPages.push(number);
     if (!page.node.has(PDFName.of('TrimBox'))) missingTrimPages.push(number);
     const annotations = document.context.lookup(page.node.get(PDFName.of('Annots')));
     if (annotations instanceof PDFArray && annotations.size()) annotationPages.push(number);
@@ -27,6 +28,10 @@ export function getPrintDocumentChecks(document, requirements = {}) {
     : missingTrimPages.length
       ? { status: 'warning', details: `No explicit finished TrimBox on pages ${missingTrimPages.join(', ')}. The CropBox is being used as the finished size; confirm it with the job ticket.`, value: missingTrimPages }
       : { status: 'pass', details: 'Explicit finished TrimBoxes and page boundaries are consistent.', value: true };
+  if (clippedTrimPages.length) {
+    if (checks.pageGeometry.status === 'pass') checks.pageGeometry.status = 'info';
+    checks.pageGeometry.details += ` The viewer CropBox clips the finished TrimBox on pages ${clippedTrimPages.join(', ')}; the explicit TrimBox remains authoritative.`;
+  }
 
   const intents = document.context.lookup(document.catalog.get(PDFName.of('OutputIntents')));
   const profiles = [], invalidProfiles = [];

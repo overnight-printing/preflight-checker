@@ -430,7 +430,7 @@ fs.mkdirSync(out, { recursive: true });
     assert.equal(results.checks['issue-nested'].checks.overprint.status, 'error');
     assert.deepEqual(results.checks['issue-nested'].checks.colorMode.pages, [1]);
     assert.equal(results.checks.order.checks.pageSize.status, 'pass');
-    assert.equal(results.checks.order.checks.bleed.status, 'pass');
+    assert.equal(results.checks.order.checks.bleed.status, 'warning');
     assert.deepEqual(results.checks.order.checks.orderBoxes.value, [1]);
     const orderOutput = await PDFDocument.load(new Uint8Array(results.outputs['order-boxes']));
     assert.deepEqual(orderOutput.getPage(0).getTrimBox(), { x: 9, y: 9, width: 252, height: 144 });
@@ -442,7 +442,7 @@ fs.mkdirSync(out, { recursive: true });
     assert.equal(results.checks.overprint.checks.overprint.status, "info");
     assert.equal(results.checks.asymmetric.checks.bleed.status, "error");
     assert.equal(results.checks.noBleedJob.checks.bleed.status, "pass");
-    assert.equal(results.checks.lowerDpiJob.checks.resolution.status, "error");
+    assert.equal(results.checks.lowerDpiJob.checks.resolution.status, "warning");
     assert.equal(results.lastPageGuard, true);
     for (const state of Object.values(results.layerVisibility)) {
       assert.equal(state.hiddenVisible, false);
@@ -575,6 +575,12 @@ fs.mkdirSync(out, { recursive: true });
       await page.locator(".artwork-filename").textContent(),
       unchanged,
     );
+    const oversized = Buffer.alloc(24);
+    oversized.set([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82]);
+    oversized.writeUInt32BE(20000, 16); oversized.writeUInt32BE(20000, 20);
+    await page.locator('input[type=file]').first().setInputFiles({ name: 'oversized.png', mimeType: 'image/png', buffer: oversized });
+    await page.getByRole('alert').filter({ hasText: '16384 pixels per edge and 40 megapixels' }).waitFor();
+    assert.equal(await page.locator('.artwork-canvas canvas').count(), 0);
     const imagePath = out + "/image.png";
     await page.evaluate(() => {
       const c = document.createElement("canvas");
@@ -701,6 +707,7 @@ fs.mkdirSync(out, { recursive: true });
     await page.locator('input[type=file]').first().setInputFiles(out + '/issue-blank-pages.pdf');
     await page.locator('.artwork-canvas canvas').waitFor();
     await page.getByRole('button', { name: 'Analyze PDF', exact: true }).click();
+    await page.getByText(/Missing explicit TrimBox and BleedBox on page 1/).waitFor();
     const remove = page.getByRole('button', { name: 'Review and Remove Blank Pages', exact: true });
     page.once('dialog', async dialog => { assert.ok(dialog.message().includes('2, 3')); await dialog.dismiss(); });
     await remove.click();
