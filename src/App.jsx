@@ -21,6 +21,7 @@ const fixBlankPage = async (...args) => (await import('./utils/preflightChecker'
 const createCustomerProofPdf = async (...args) => (await import('./utils/customerProof')).createCustomerProofPdf(...args);
 const createPngProofSourcePdf = async (...args) => (await import('./utils/customerProof')).createPngProofSourcePdf(...args);
 const createCompatibilityArtworkPdf = async (...args) => (await import('./utils/compatibilityPdf')).createCompatibilityArtworkPdf(...args);
+const getCompatibilityDpiFit = async (...args) => (await import('./utils/compatibilityPdf')).getCompatibilityDpiFit(...args);
 
 import {
   analyzeBackgroundLuminance,
@@ -191,6 +192,7 @@ export default function App() {
   const [compatibilityDpi, setCompatibilityDpi] = useState(600);
   const [artworkRepair, setArtworkRepair] = useState(null);
   const outputArtworkDpi = pdfOutputMode === 'compatibility' ? compatibilityDpi : artworkRepair?.dpi;
+  const [compatibilityDpiFit, setCompatibilityDpiFit] = useState(null); // { feasibleDpi, attempts, pagesFittingAt300 } | 'checking' | null
   
   // Theme state
   const [theme, setTheme] = useState(() => {
@@ -831,6 +833,21 @@ export default function App() {
       setPreflightResults(null);
     }
   }, [artworkFile, pdfDoc, artworkType]);
+
+  // Tell the operator what fits before they attempt a compatibility export,
+  // instead of letting the memory-cap error surface only after they click.
+  useEffect(() => {
+    if (pdfOutputMode !== 'compatibility' || artworkType !== 'pdf' || !artworkFile || !pdfDoc) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCompatibilityDpiFit(null);
+      return;
+    }
+    let active = true;
+    setCompatibilityDpiFit('checking');
+    getCompatibilityDpiFit(artworkFile, pdfDoc).then(fit => { if (active) setCompatibilityDpiFit(fit); },
+      () => { if (active) setCompatibilityDpiFit(null); });
+    return () => { active = false; };
+  }, [pdfOutputMode, artworkFile, pdfDoc, artworkType]);
 
   const handleRunFullPreflight = useCallback(async () => {
     if (!artworkFile || artworkType !== 'pdf' || !pdfDoc) return;
@@ -1530,6 +1547,12 @@ export default function App() {
                     </label>
                     <p className="field-help">For objects or gradients that disappear when printed. Bakes the visible artwork into an opaque RGB image on white; the Union Bug stays vector.</p>
                     <p className="field-help">Source text/vectors, CMYK and spot plates become RGB pixels. Source output profiles are removed. Annotations/forms are excluded; overprint is not simulated. Confirm the preview and printer color settings, then test one page. Use a desktop transparency flattener when press colors or vector text must be retained.</p>
+                    {compatibilityDpiFit === 'checking' && <p className="field-help">Checking whether this document fits in browser memory…</p>}
+                    {compatibilityDpiFit && compatibilityDpiFit !== 'checking' && !compatibilityDpiFit.attempts[compatibilityDpi]?.fits && (
+                      compatibilityDpiFit.feasibleDpi
+                        ? <p className="field-help" role="status">This document is too large to flatten at {compatibilityDpi} DPI in the browser. {compatibilityDpiFit.feasibleDpi} DPI fits — select it above.</p>
+                        : <p className="field-help" role="status">This document does not fit in browser memory at 300 or 600 DPI. {compatibilityDpiFit.pagesFittingAt300.length} of {totalPages} pages fit individually at 300 DPI; flatten affected pages one at a time with "Apply flattening repair", or use a desktop transparency flattener for the full document.</p>
+                    )}
                   </>}
                   {artworkRepair && <p className="field-help">RGB repair applied: {Object.entries(artworkRepair.pageDpi).map(([page, dpi]) => `page ${page} at ${dpi} DPI`).join(', ')}. Source vectors, text and ink plates on these pages became pixels. Reset Artwork restores the original PDF.</p>}
                 </div>
