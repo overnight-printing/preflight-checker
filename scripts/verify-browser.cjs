@@ -224,6 +224,31 @@ fs.mkdirSync(out, { recursive: true });
   formIssuePage.node.set(PDFName.of('Resources'), formIssue.context.obj({ ...states, XObject: { Inner: inner } }));
   formIssuePage.node.set(PDFName.of('Contents'), formIssue.context.register(formIssue.context.flateStream('/Over gs /Inner Do')));
   issueFiles['issue-nested'] = [...await formIssue.save()];
+  const selective = await PDFDocument.create();
+  const selectivePage = selective.addPage([252, 144]);
+  selectivePage.node.set(PDFName.of('PieceInfo'), selective.context.obj({ Illustrator: {
+    Private: selective.context.register(selective.context.stream('private editing data'.repeat(1000)))
+  } }));
+  const tint = { FunctionType: 2, Domain: [0, 1], C0: [0, 0, 0, 0], C1: [0, 0, 0, 1], N: 1 };
+  const fonts = Object.fromEntries(['OutlineMe', 'KeepText'].map(name => [name, selective.context.register(selective.context.obj({
+    Type: 'Font', Subtype: 'Type3', BaseFont: name,
+    FontMatrix: [0.001, 0, 0, 0.001, 0, 0], FontBBox: [0, 0, 500, 500],
+    CharProcs: { square: selective.context.register(selective.context.flateStream('500 0 d0 0 0 500 500 re f')) },
+    Encoding: { Differences: [65, 'square'] }, FirstChar: 65, LastChar: 65, Widths: [500]
+  }))]));
+  selectivePage.node.set(PDFName.of('Resources'), selective.context.obj({
+    Font: fonts,
+    ColorSpace: {
+      Ink: ['Separation', 'PANTONE 877 U', 'DeviceCMYK', tint],
+      Foil: ['Separation', 'SILVER FOIL', 'DeviceCMYK', tint],
+      Registration: ['Separation', 'All', 'DeviceCMYK', tint],
+      Invisible: ['Separation', 'None', 'DeviceCMYK', tint]
+    }
+  }));
+  selectivePage.node.set(PDFName.of('Contents'), selective.context.register(selective.context.flateStream(
+    '/Ink cs 1 scn 10 10 30 30 re f /Foil cs 1 scn 60 10 30 30 re f 0 0 0 1 k BT /OutlineMe 20 Tf 10 70 Td (A) Tj ET BT /KeepText 20 Tf 60 70 Td (A) Tj ET'
+  )));
+  fs.writeFileSync(out + '/selective-repairs.pdf', await selective.save());
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 },
@@ -426,7 +451,8 @@ fs.mkdirSync(out, { recursive: true });
     assert.deepEqual(results.checks['issue-rgb-pages'].checks.colorMode.pages, [2]);
     assert.equal(results.checks['issue-strings'].checks.colorMode.status, 'pass');
     assert.deepEqual(results.checks['issue-blank-pages'].checks.blankPages.value, [2, 3]);
-    assert.equal(results.checks['issue-nested'].checks.fontEmbedding.status, 'pass');
+    assert.equal(results.checks['issue-nested'].checks.fontEmbedding.status, 'info');
+    assert.equal(results.checks['issue-nested'].checks.fontEmbedding.fixable, true);
     assert.equal(results.checks['issue-nested'].checks.overprint.status, 'error');
     assert.deepEqual(results.checks['issue-nested'].checks.colorMode.pages, [1]);
     assert.equal(results.checks.order.checks.pageSize.status, 'pass');
@@ -438,7 +464,7 @@ fs.mkdirSync(out, { recursive: true });
     assert.equal(results.checks.card.checks.blankPages.status, "pass");
     assert.equal(results.checks.nested.checks.resolution.status, "error");
     assert.equal(results.checks.nested.checks.colorMode.status, "warning");
-    assert.equal(results.checks.composite.checks.fontEmbedding.status, "pass");
+    assert.equal(results.checks.composite.checks.fontEmbedding.status, "info");
     assert.equal(results.checks.overprint.checks.overprint.status, "info");
     assert.equal(results.checks.asymmetric.checks.bleed.status, "error");
     assert.equal(results.checks.noBleedJob.checks.bleed.status, "pass");
@@ -472,6 +498,48 @@ fs.mkdirSync(out, { recursive: true });
       width: 252,
       height: 144,
     });
+    // Repair only the chosen ink/font, retaining finishing plates and text across scans/collapse.
+    await page.locator('input[type=file]').first().setInputFiles(out + '/selective-repairs.pdf');
+    await page.getByRole('button', { name: 'Analyze PDF', exact: true }).click();
+    const spots = page.getByRole('group', { name: 'Spot colors to convert', exact: true });
+    const fontChoices = page.getByRole('group', { name: 'Fonts to outline', exact: true });
+    await spots.waitFor();
+    assert.equal(await spots.getByRole('checkbox').count(), 2, 'registration and None cannot be selected');
+    await spots.getByRole('checkbox', { name: 'SILVER#20FOIL', exact: true }).uncheck();
+    await spots.getByRole('checkbox', { name: 'PANTONE#20877#20U', exact: true }).uncheck();
+    assert.equal(await page.getByRole('button', { name: 'Convert to CMYK (0/2)', exact: true }).isDisabled(), true);
+    await spots.getByRole('checkbox', { name: 'PANTONE#20877#20U', exact: true }).check();
+    await fontChoices.getByRole('checkbox', { name: 'KeepText', exact: true }).uncheck();
+    await page.getByRole('button', { name: 'Collapse Preflight sidebar', exact: true }).click();
+    await page.getByRole('button', { name: 'Expand Preflight sidebar', exact: true }).click();
+    assert.equal(await spots.getByRole('checkbox', { name: 'SILVER#20FOIL', exact: true }).isChecked(), false);
+    await page.getByRole('button', { name: 'Re-analyze', exact: true }).click();
+    await spots.waitFor();
+    assert.equal(await fontChoices.getByRole('checkbox', { name: 'KeepText', exact: true }).isChecked(), false);
+    await page.screenshot({ path: out + '/selective-repairs-ui.png', fullPage: true });
+    await page.getByRole('button', { name: 'Convert to CMYK (1/2)', exact: true }).click();
+    await page.getByRole('button', { name: 'Convert to CMYK (0/1)', exact: true }).waitFor();
+    assert.equal(await spots.getByRole('checkbox').count(), 1);
+    assert.equal(await spots.getByRole('checkbox').isChecked(), false);
+    await page.getByRole('button', { name: 'Create Outlines (1/2)', exact: true }).click();
+    await page.getByRole('button', { name: 'Create Outlines (0/1)', exact: true }).waitFor();
+    assert.equal(await fontChoices.getByRole('checkbox').isChecked(), false);
+    const selectiveDownload = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Save Production File', exact: true }).click();
+    await (await selectiveDownload).saveAs(out + '/ui-selective-repairs.pdf');
+    const repaired = await PDFDocument.load(fs.readFileSync(out + '/ui-selective-repairs.pdf'));
+    const objects = repaired.context.enumerateIndirectObjects().map(([, object]) => object.toString()).join('\n');
+    assert.ok(!objects.includes('/PieceInfo'), 'production export omits private editor data');
+    assert.ok(objects.includes('/SILVER#20FOIL'), 'foil plate survives production export');
+    assert.ok(!objects.includes('/PANTONE#20877#20U'), 'chosen ink converted');
+    assert.ok(objects.includes('/BaseFont /KeepText'), 'unselected font stays text');
+    assert.ok(!objects.includes('/BaseFont /OutlineMe'), 'selected font outlined');
+    await page.locator('input[type=file]').first().setInputFiles(out + '/selective-repairs.pdf');
+    await page.getByRole('button', { name: 'Analyze PDF', exact: true }).click();
+    await page.getByRole('button', { name: 'Convert to CMYK (2/2)', exact: true }).waitFor();
+    assert.equal(await spots.getByRole('checkbox', { name: 'SILVER#20FOIL', exact: true }).isChecked(), true);
+    assert.equal(await fontChoices.getByRole('checkbox', { name: 'KeepText', exact: true }).isChecked(), true);
+
     // Real UI upload, scan, replacement, edit, download, image proof, and keyboard flows.
     await page
       .locator("input[type=file]")
@@ -482,9 +550,7 @@ fs.mkdirSync(out, { recursive: true });
       .getByRole("button", { name: "Analyze PDF", exact: true })
       .click();
     await page.getByText("No blank pages detected", { exact: true }).waitFor();
-    await page
-      .getByRole("button", { name: "Stamper Settings", exact: true })
-      .click();
+
     await page
       .getByRole("checkbox", { name: "Add mirror bleed", exact: true })
       .check();
@@ -526,7 +592,7 @@ fs.mkdirSync(out, { recursive: true });
     const layeredDownloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: "Save Production File", exact: true }).click();
     await (await layeredDownloadPromise).saveAs(out + "/ui-layers.pdf");
-    await page.getByRole("button", { name: "Preflight", exact: true }).click();
+
     await page.getByRole("button", { name: "Check production output", exact: true }).click();
     await page.getByText(/Checked production output/).waitFor();
     await page.getByText('Bleed meets the job target (0.125" each edge)', { exact: true }).waitFor();
@@ -539,15 +605,15 @@ fs.mkdirSync(out, { recursive: true });
     assert.equal(report.requirements.workflow, "general");
     assert.equal(report.checks.interactiveContent.status, "warning");
     assert.ok(report.checks.interactiveContent.details.includes("source PDF"));
-    await page.getByRole("button", { name: "Stamper Settings", exact: true }).click();
+
     if (await page.getByRole("checkbox", { name: "Add mirror bleed", exact: true }).count() === 0)
       await page.getByRole("button", { name: "Bleed & Trim", exact: false }).click();
     await page.getByRole("checkbox", { name: "Add mirror bleed", exact: true }).uncheck();
     await page.locator(".loading-overlay").waitFor({ state: "hidden" });
-    await page.getByRole("button", { name: "Preflight", exact: true }).click();
+
     assert.equal(await page.getByText(/Checked production output/).count(), 0);
     await page.getByRole("button", { name: "Analyze PDF", exact: true }).waitFor();
-    await page.getByRole("button", { name: "Stamper Settings", exact: true }).click();
+
 
     await page
       .locator("input[type=file]")
@@ -666,7 +732,7 @@ fs.mkdirSync(out, { recursive: true });
       .getByRole("button", { name: "Show page previews", exact: true })
       .click();
     assert.equal(await page.locator(".page-thumbnail-item").count(), 2);
-    await page.getByRole("button", { name: "Preflight", exact: true }).click();
+
     await page
       .getByRole("button", { name: "Analyze PDF", exact: true })
       .click();
@@ -695,7 +761,7 @@ fs.mkdirSync(out, { recursive: true });
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.locator('input[type=file]').first().setInputFiles(out + '/issue-order.pdf');
     await page.locator('.artwork-canvas canvas').waitFor();
-    await page.getByRole('button', { name: 'Preflight', exact: true }).click();
+
     await page.getByText('Job requirements', { exact: true }).click();
     await page.getByLabel('Finished order size', { exact: true }).selectOption('card');
     await page.getByRole('button', { name: 'Analyze PDF', exact: true }).click();

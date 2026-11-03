@@ -188,6 +188,7 @@ export default function App() {
 
   // Preflight states
   const [preflightResults, setPreflightResults] = useState(null);
+  const [excludedRepairNames, setExcludedRepairNames] = useState({});
   const [printRequirements, setPrintRequirements] = useState(DEFAULT_PRINT_REQUIREMENTS);
   const [pdfOutputMode, setPdfOutputMode] = useState('preserve');
   const [compatibilityDpi, setCompatibilityDpi] = useState(600);
@@ -429,6 +430,7 @@ export default function App() {
     resetUnionBugSettings();
     setArtworkFile(file);
     setOriginalFile(file); // Store initial upload as backup
+    setExcludedRepairNames({});
     setArtworkCanvas(null);
     setPdfDoc(null);
     setOriginalImage(null);
@@ -884,11 +886,12 @@ export default function App() {
   }, [artworkFile, pdfDoc, artworkType, printRequirements, artworkRepair]);
 
   // Handler for Preflight Auto-Fixes
-  const handlePreflightFix = async (checkKey) => {
+  const handlePreflightFix = async (checkKey, selectedNames) => {
     if (!artworkFile || isBusy || isScanning) return;
     const pagesToRemove = checkKey === 'blankPages' ? preflightResults?.checks?.blankPages?.value || [] : [];
-    const spotNames = checkKey === 'spotColors' ? (preflightResults?.checks?.spotColors?.value || []).filter(name => !['All', 'None'].includes(name)) : [];
-    const fontNames = checkKey === 'fontEmbedding' ? (preflightResults?.checks?.fontEmbedding?.value || []) : [];
+    const names = Array.isArray(selectedNames) ? (preflightResults?.checks?.[checkKey]?.value || []).filter(name => selectedNames.includes(name)) : [];
+    const spotNames = checkKey === 'spotColors' ? names.filter(name => !['All', 'None'].includes(name)) : [];
+    const fontNames = checkKey === 'fontEmbedding' ? names : [];
     if (checkKey === 'blankPages') {
       if (!pagesToRemove.length) return;
       if (pagesToRemove.length >= totalPages) { setNotice({ type: 'error', message: 'At least one page must remain. Remove pages individually in a PDF editor.' }); return; }
@@ -964,12 +967,12 @@ export default function App() {
         setArtworkFile(correctedFile);
         setPdfDoc(doc);
         setTotalPages(doc.numPages);
-        setNotice({ type: 'success', message: checkKey === 'flattenArtwork'
+        setNotice({ type: spotConversionReport?.unconverted.length || fontOutlineReport?.unconverted.length ? 'warning' : 'success', message: checkKey === 'flattenArtwork'
           ? `Flattening repair applied at ${compatibilityDpi} DPI in RGB. Repaired page: ${currentPage}. Review the updated preview, then Save Production File. Reset Artwork restores the original.`
           : checkKey === 'spotColors'
-          ? `${spotConversionReport.converted.length ? `Converted to CMYK: ${spotConversionReport.converted.join(', ')}.` : 'No spots were converted.'}${spotConversionReport.unconverted.length ? ` Left unchanged (unsupported alternate space or tint-transform): ${spotConversionReport.unconverted.join(', ')}.` : ''} Review the updated checks, then Save Production File. Reset Artwork restores the original.`
+          ? `${spotConversionReport.converted.length ? `Converted to CMYK: ${spotConversionReport.converted.join(', ')}.` : 'No spots were converted.'}${spotConversionReport.unconverted.length ? ` Left unchanged (requires a DeviceCMYK alternate and supported tint-transform, with all shared DeviceN inks selected): ${spotConversionReport.unconverted.join(', ')}. Use a color-managed PDF editor for other alternate spaces.` : ''} Review the updated checks, then Save Production File. Reset Artwork restores the original.`
           : checkKey === 'fontEmbedding'
-          ? `${fontOutlineReport.converted.length ? `Outlined to vector paths: ${fontOutlineReport.converted.join(', ')}.` : 'No fonts were outlined.'}${fontOutlineReport.unconverted.length ? ` Left unchanged (unsupported font type/encoding, or unresolved characters): ${fontOutlineReport.unconverted.join(', ')}.` : ''} Review the updated checks, then Save Production File. Reset Artwork restores the original.`
+          ? `${fontOutlineReport.converted.length ? `Outlined to vector paths: ${fontOutlineReport.converted.join(', ')}.` : 'No fonts were outlined.'}${fontOutlineReport.unconverted.length ? ` Left unchanged (unsupported font/encoding/render mode, unresolved characters, or mixed font selections within a text object): ${fontOutlineReport.unconverted.join(', ')}.` : ''} Review the updated checks, then Save Production File. Reset Artwork restores the original.`
           : 'Repair applied. Review the updated checks, then Save Production File. Reset Artwork restores the original.' });
 
         // Re-run preflight scan to update the UI status
@@ -1469,6 +1472,8 @@ export default function App() {
 
                 <fieldset className="tool-controls" disabled={controlsBusy}>
                   <PreflightPanel
+                    excludedNames={excludedRepairNames}
+                    onExcludedNamesChange={setExcludedRepairNames}
                     currentPage={currentPage}
                     results={displayedPreflightResults}
                     isScanning={isScanning}
@@ -1715,7 +1720,7 @@ export default function App() {
                 </div>
                 <div className="export-heading">
                   <strong>Production file</strong>
-                  <span>{outputArtworkDpi && artworkType === 'pdf' ? `Compatibility PDF · ${outputArtworkDpi} DPI RGB artwork.` : 'Save the current output as a production file.'}</span>
+                  <span>{outputArtworkDpi && artworkType === 'pdf' ? `Compatibility PDF · ${outputArtworkDpi} DPI RGB artwork.` : 'Optimized for printing. Keep the original file for editing.'}</span>
                 </div>
                 <button
                   className={`btn btn-action-block ${

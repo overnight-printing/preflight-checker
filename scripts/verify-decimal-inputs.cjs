@@ -52,7 +52,6 @@ const path = require('node:path');
       assert.equal(await input.inputValue(), text);
     };
 
-    await page.getByRole('button', { name: 'Stamper Settings', exact: true }).click();
     await page.getByRole('checkbox', { name: 'Add mirror bleed', exact: true }).check();
     await ready();
     const bleed = page.getByLabel('Bleed size', { exact: true });
@@ -106,7 +105,6 @@ const path = require('node:path');
     await verifySwitches();
     await page.screenshot({ path: out + '/decimal-inputs.png', fullPage: true });
 
-    await page.getByRole('button', { name: 'Preflight', exact: true }).click();
     await page.getByText('Job requirements', { exact: true }).click();
     await page.getByLabel('Finished order size', { exact: true }).selectOption('custom');
     await page.getByRole('button', { name: 'Analyze PDF', exact: true }).click();
@@ -136,7 +134,7 @@ const path = require('node:path');
       if (!await page.locator('details.print-requirements').evaluate(element => element.open)) await page.getByText('Job requirements', { exact: true }).click();
       await verifyFields([width, height, page.getByLabel('Finished order size', { exact: true })]);
       await page.screenshot({ path: out + `/ui-preflight-${theme}.png`, fullPage: true });
-      await page.getByRole('button', { name: 'Stamper Settings', exact: true }).click();
+
       await verifyFields([bleed, crop, safe, page.locator('#pdf-output-mode')]);
       await verifySwitches();
       await page.screenshot({ path: out + `/ui-stamper-${theme}.png`, fullPage: true });
@@ -146,7 +144,7 @@ const path = require('node:path');
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Controls must not create mobile horizontal overflow');
       await page.screenshot({ path: out + `/ui-stamper-mobile-${theme}.png`, fullPage: true });
       await page.setViewportSize({ width: 1440, height: 900 });
-      await page.getByRole('button', { name: 'Preflight', exact: true }).click();
+
     }
     assert.deepEqual(errors, []);
     console.log('Decimal inputs passed: continuous typing, caret edits, Enter/Tab, invalid drafts, Escape, steppers, preset sync, safe zone, order dimensions, and crop/bleed export.');

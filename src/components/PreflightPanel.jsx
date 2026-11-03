@@ -22,12 +22,21 @@ export default function PreflightPanel({
   onRequirementsChange,
   onFix,
   onReset,
+  excludedNames,
+  onExcludedNamesChange,
   artworkType,
   compatibilityDpi,
   onCompatibilityDpiChange,
   bleedAmount = 0
 }) {
   const [requirementsOpen, setRequirementsOpen] = useState(false);
+  const toggleSelection = (key, name) => {
+    onExcludedNamesChange(prev => {
+      const next = new Set(prev[key]);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return { ...prev, [key]: next };
+    });
+  };
   const orderSizes = { card: [252, 144], postcard: [432, 288], letter: [612, 792] };
   const orderPreset = !requirements.orderSize ? 'none' : Object.keys(orderSizes).find(key => orderSizes[key][0] === requirements.orderSize.width && orderSizes[key][1] === requirements.orderSize.height) || 'custom';
   const requirementsPanel = (
@@ -271,6 +280,9 @@ export default function PreflightPanel({
             const isFailed = check.status !== 'pass';
             const pendingBleed = results.scope !== 'production' && key === 'bleed' && isFailed && bleedAmount > 0 && bleedAmount >= requirements.bleedPoints - 0.01;
             const isFixable = results.scope !== 'production' && check.fixable && isFailed && !pendingBleed;
+            const selectable = key === 'spotColors' || key === 'fontEmbedding';
+            const names = selectable ? (check.value || []).filter(name => key !== 'spotColors' || !['All', 'None'].includes(name)) : [];
+            const selected = names.filter(name => !excludedNames[key]?.has(name));
 
             return (
               <div 
@@ -309,13 +321,26 @@ export default function PreflightPanel({
                   </div>
                 </div>
 
+                {isFixable && selectable && (
+                  <div role="group" aria-label={key === 'spotColors' ? 'Spot colors to convert' : 'Fonts to outline'} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <p className="field-help">{key === 'spotColors' ? 'Uncheck plates to preserve, including foil, varnish, and other finishes.' : 'Uncheck fonts to keep as editable text.'}</p>
+                    {names.map(name => (
+                      <label key={name} style={{ display: 'flex', alignItems: 'center', gap: '8px', minHeight: '28px', fontSize: '12px', color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>
+                        <input type="checkbox" checked={selected.includes(name)} onChange={() => toggleSelection(key, name)} />
+                        {name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+
                 {isFixable && (
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
                     <button
                       className="btn btn-secondary"
-                      onClick={() => onFix(key)}
+                      disabled={selectable && selected.length === 0}
+                      onClick={() => onFix(key, selectable ? selected : undefined)}
                     >
-                      {getFixButtonText(key)}
+                      {getFixButtonText(key)}{selectable ? ` (${selected.length}/${names.length})` : ''}
                     </button>
                   </div>
                 )}

@@ -78,7 +78,9 @@ test('outlineFontsInPdf converts a simple Tj call for a selected embedded TrueTy
 
   const text = streamText(doc, content);
   assert.ok(!text.includes('Tj'), `expected Tj to be gone: ${text}`);
-  assert.match(text, / f ET$/, `expected a trailing fill operator before ET: ${text}`);
+  assert.match(text, /ET q .* f Q BT/, 'paths must paint outside BT/ET');
+  assert.ok(text.includes('6 7 l'), 'glyph extends above the baseline, not below it');
+  assert.ok(!text.includes('Tf'), 'removed fonts must not leave dangling selectors');
   // rect glyph: 1 moveto + 3 lineto, no explicit close (TrueType contours decode without a literal Z)
   assert.equal((text.match(/ m\b/g) || []).length, 1);
   assert.equal((text.match(/ l\b/g) || []).length, 3);
@@ -100,8 +102,9 @@ test('outlineFontsInPdf leaves a font\'s resource entry in place when any of its
   page.node.set(PDFName.of('Contents'), content);
 
   const { converted, unconverted } = outlineFontsInPdf(doc, new Set(['TestFont']));
-  assert.deepEqual([...converted], ['TestFont']);
+  assert.equal(converted.size, 0);
   assert.deepEqual([...unconverted], ['TestFont']);
+  assert.equal(streamText(doc, content), 'BT /F1 10 Tf 0 0 Td (A) Tj 0 0 Td (Z) Tj ET');
   assert.ok(page.node.Resources().lookup(PDFName.of('Font')).get(PDFName.of('F1')) !== undefined, 'font resource should survive since not everything converted');
 });
 
@@ -260,6 +263,67 @@ test('outlineFontsInPdf positions a second glyph using the first glyph\'s declar
   assert.ok(Math.abs((moves[1] - moves[0]) - 6.5) < 1e-3, `expected ~6.5pt advance, got ${moves[1] - moves[0]}`);
 });
 
+test('outlineFontsInPdf uses PDF widths rather than conflicting embedded font metrics', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const fontRef = await embedTestFont(doc, buildTestFont());
+  const font = doc.context.lookup(fontRef);
+  font.set(PDFName.of('FirstChar'), doc.context.obj(65));
+  font.set(PDFName.of('Widths'), doc.context.obj([900, 800]));
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: { F1: fontRef } }));
+  const content = doc.context.register(doc.context.flateStream('BT /F1 10 Tf (AB) Tj ET'));
+  page.node.set(PDFName.of('Contents'), content);
+  outlineFontsInPdf(doc, new Set(['TestFont']));
+  const moves = [...streamText(doc, content).matchAll(/(-?[\d.]+) (-?[\d.]+) m\b/g)].map(m => Number(m[1]));
+  assert.deepEqual(moves, [0, 9]);
+});
+
+test('outlineFontsInPdf preserves a mixed selected/unselected text object byte for byte', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const fontRef = await embedTestFont(doc, buildTestFont());
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: {
+    F1: fontRef, F2: { Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica' }
+  } }));
+  const source = 'BT /F1 10 Tf (AB) Tj /F2 10 Tf (Keep text) Tj ET';
+  const content = doc.context.register(doc.context.flateStream(source));
+  page.node.set(PDFName.of('Contents'), content);
+  const result = outlineFontsInPdf(doc, new Set(['TestFont']));
+  assert.equal(streamText(doc, content), source);
+  assert.equal(result.converted.size, 0);
+  assert.deepEqual([...result.unconverted], ['TestFont']);
+});
+
+test('outlineFontsInPdf retains font resources used by clipping or invisible text', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const fontRef = await embedTestFont(doc, buildTestFont());
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: { F1: fontRef } }));
+  const untouched = 'BT /F1 10 Tf 4 Tr (A) Tj ET';
+  const content = doc.context.register(doc.context.flateStream('BT /F1 10 Tf (A) Tj ET ' + untouched));
+  page.node.set(PDFName.of('Contents'), content);
+  const result = outlineFontsInPdf(doc, new Set(['TestFont']));
+  assert.deepEqual([...result.unconverted], ['TestFont']);
+  assert.ok(streamText(doc, content).endsWith(untouched));
+  assert.equal(page.node.Resources().lookup(PDFName.of('Font')).get(PDFName.of('F1')), fontRef);
+});
+
+test('outlineFontsInPdf handles quoted text line moves and text objects split across streams', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const fontRef = await embedTestFont(doc, buildTestFont());
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: { F1: fontRef } }));
+  page.node.set(PDFName.of('Contents'), doc.context.obj([
+    doc.context.register(doc.context.flateStream('q 2 0 0 2 10 10 cm BT /F1 10 Tf 10 TL 10 50 Td (A) Tj')),
+    doc.context.register(doc.context.flateStream('(A) \' 2 3 (A) " ET Q'))
+  ]));
+  const result = outlineFontsInPdf(doc, new Set(['TestFont']));
+  assert.deepEqual([...result.converted], ['TestFont']);
+  const text = streamText(doc, page.node.get(PDFName.of('Contents')));
+  const moves = [...text.matchAll(/(-?[\d.]+) (-?[\d.]+) m\b/g)].map(m => [Number(m[1]), Number(m[2])]);
+  assert.deepEqual(moves, [[10, 50], [10, 40], [10, 30]]);
+});
+
 test('outlineFontsInPdf refuses a non-embedded font and leaves its text byte-identical', async () => {
   const doc = await PDFDocument.create();
   const page = doc.addPage([200, 200]);
@@ -320,6 +384,22 @@ test('outlineFontsInPdf follows a non-identity CIDToGIDMap stream', async () => 
   assert.match(text, /\b5 0 l\b/, `expected B's 500-unit width (-> 5pt at fontsize 10) reflected: ${text}`);
 });
 
+test('outlineFontsInPdf honors both array and range forms of CID PDF widths', async () => {
+  for (const [widths, expected] of [[[1, [900, 800]], 9], [[1, 2, 700], 7]]) {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([200, 200]);
+    const font = buildCidFontDict(doc);
+    const descendant = doc.context.lookup(doc.context.lookup(font).lookup(PDFName.of('DescendantFonts')).get(0));
+    descendant.set(PDFName.of('W'), doc.context.obj(widths));
+    page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: { F1: font } }));
+    const content = doc.context.register(doc.context.flateStream('BT /F1 10 Tf <00010002> Tj ET'));
+    page.node.set(PDFName.of('Contents'), content);
+    outlineFontsInPdf(doc, new Set(['TestFontCID']));
+    const moves = [...streamText(doc, content).matchAll(/(-?[\d.]+) (-?[\d.]+) m\b/g)].map(m => Number(m[1]));
+    assert.deepEqual(moves, [0, expected]);
+  }
+});
+
 test('outlineFontsInPdf refuses a vertical (Identity-V) CID font and leaves its text byte-identical', async () => {
   const doc = await PDFDocument.create();
   const page = doc.addPage([200, 200]);
@@ -366,6 +446,44 @@ test('outlineFontsInPdf correctly positions outlined text inside a transformed F
   const text = streamText(doc, formStream);
   assert.ok(!text.includes('Tj'));
   const [firstMove] = [...text.matchAll(/(-?[\d.]+) (-?[\d.]+) m\b/g)].map(m => [Number(m[1]), Number(m[2])]);
-  // glyph origin (0,0) under Tm (identity) * CTM (scale 2, translate 50,50) = (50, 50)
-  assert.ok(Math.abs(firstMove[0] - 50) < 1e-3 && Math.abs(firstMove[1] - 50) < 1e-3, `expected glyph origin at (50,50), got ${firstMove}`);
+  // The Form's caller applies its matrix when drawing; baking it into the path applies it twice.
+  assert.deepEqual(firstMove, [0, 0]);
+});
+
+test('outlineFontsInPdf renders bare CFF text identically under page and shared Form transforms', async () => {
+  const { createCanvas, DOMMatrix, ImageData, Path2D } = await import('@napi-rs/canvas');
+  Object.assign(globalThis, { DOMMatrix, ImageData, Path2D });
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const fontRef = embedBareCffFont(doc, extractCffTable(buildTestFont()));
+  const font = doc.context.lookup(fontRef);
+  font.set(PDFName.of('FirstChar'), doc.context.obj(65));
+  font.set(PDFName.of('Widths'), doc.context.obj([650, 600]));
+  const form = doc.context.register(doc.context.flateStream('BT /F1 20 Tf 10 10 Td (AB) Tj ET', {
+    Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 50, 50], Matrix: [1, 0, 0.2, 1, 0, 0],
+    Resources: { Font: { F1: fontRef } }
+  }));
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: { F1: fontRef }, XObject: { Fm: form } }));
+  page.node.set(PDFName.of('Contents'), doc.context.register(doc.context.flateStream(
+    'q 1.5 0 0 1.5 10 10 cm BT /F1 20 Tf 10 10 Td (AB) Tj ET Q q 1 0 0 1 10 70 cm /Fm Do Q q 0 1 -1 0 170 100 cm /Fm Do Q'
+  )));
+  const render = async bytes => {
+    const proxy = await pdfjs.getDocument({ data: bytes, disableFontFace: true }).promise;
+    try {
+      const page = await proxy.getPage(1);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = createCanvas(viewport.width, viewport.height);
+      const context = canvas.getContext('2d');
+      await page.render({ canvasContext: context, viewport }).promise;
+      return context.getImageData(0, 0, canvas.width, canvas.height).data;
+    } finally { await proxy.destroy(); }
+  };
+  const before = await render(await doc.save());
+  const result = outlineFontsInPdf(doc, new Set(['TestCFFFont']));
+  assert.deepEqual([...result.converted], ['TestCFFFont']);
+  const after = await render(await doc.save());
+  let changed = 0;
+  for (let i = 0; i < before.length; i += 4) if (Math.abs(before[i] - after[i]) > 16) changed++;
+  assert.ok(changed < 100, `${changed} pixels changed after outlining`);
 });

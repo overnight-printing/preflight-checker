@@ -3,7 +3,6 @@ import { contentOperators, scanContent } from './pdfContent.js';
 import { evaluatePdfFunction } from './pdfFunction.js';
 
 const DEVICE_SPACES = ['/DeviceGray', '/DeviceRGB', '/DeviceCMYK'];
-const PAINT_OPERATOR = { '/DeviceGray': 'g', '/DeviceRGB': 'rg', '/DeviceCMYK': 'k' };
 
 function resolveColorSpace(name, resources, lookup) {
   if (typeof name !== 'string' || DEVICE_SPACES.includes(name) || name === '/Pattern') return null;
@@ -11,30 +10,11 @@ function resolveColorSpace(name, resources, lookup) {
   return spaces instanceof PDFDict ? lookup(spaces.get(PDFName.of(name.slice(1)))) || null : null;
 }
 
-// Resolve an alternate colorspace to one of Gray/RGB/CMYK, following
-// CalGray/CalRGB and ICCBased channel count the way preflightChecker.js's
-// isRgbColorSpace already does - or null to refuse rather than guess (Lab,
-// an unusual ICC channel count, or anything else unrecognized).
-function deviceEquivalent(space, lookup) {
-  const name = space?.toString?.();
-  if (DEVICE_SPACES.includes(name)) return name;
-  if (!(space instanceof PDFArray)) return null;
-  const type = space.get(0)?.toString();
-  if (type === '/CalGray') return '/DeviceGray';
-  if (type === '/CalRGB') return '/DeviceRGB';
-  if (type === '/ICCBased') {
-    const profile = lookup(space.get(1));
-    const channels = profile instanceof PDFRawStream && profile.dict.get(PDFName.of('N'))?.asNumber();
-    return { 1: '/DeviceGray', 3: '/DeviceRGB', 4: '/DeviceCMYK' }[channels] || null;
-  }
-  return null;
-}
-
 /**
  * Rewrites scn/SCN paint operators that use an operator-selected Separation
  * or DeviceN spot, replacing each with the colorspace's own declared
- * tint-transform equivalent in its alternate space - spec-correct, not an
- * approximation. A spot whose alternate space isn't Gray/RGB/CMYK, or whose
+ * tint-transform equivalent in DeviceCMYK. A spot with another alternate
+ * space (including ICCBased, whose profile must not be discarded), or whose
  * tint-transform fails to evaluate, or whose operands don't match the
  * colorspace's component count, is left completely untouched and reported
  * in `unconverted` rather than guessed at.
@@ -63,20 +43,23 @@ export function convertSpotColorsInContent(text, resources, lookup, spotNames, i
     const spotList = (namesEntry instanceof PDFArray ? namesEntry.asArray() : [namesEntry]).map(value => value?.toString());
     const selected = spotList.filter(name => spotNames.has(name));
     if (!selected.length) continue;
+    // A DeviceN tint transform converts every component together; preserve unselected plates.
+    if (selected.length !== spotList.length) { selected.forEach(name => unconverted.add(name)); continue; }
 
     const tint = args.filter(arg => typeof arg === 'number');
     if (tint.length !== spotList.length) { selected.forEach(name => unconverted.add(name)); continue; }
 
-    const targetSpace = deviceEquivalent(lookup(space.get(2)), lookup);
-    const paintOp = targetSpace && PAINT_OPERATOR[targetSpace];
-    if (!paintOp) { selected.forEach(name => unconverted.add(name)); continue; }
+    // shortcut: convert only DeviceCMYK alternates, expand with color-managed conversion.
+    if (lookup(space.get(2)) !== PDFName.of('DeviceCMYK')) { selected.forEach(name => unconverted.add(name)); continue; }
 
     let result;
     try { result = evaluatePdfFunction(lookup(space.get(3)), tint, lookup); }
     catch { result = null; }
-    if (!result) { selected.forEach(name => unconverted.add(name)); continue; }
+    if (!result || result.length !== 4 || result.some(value => !Number.isFinite(value) || value < 0 || value > 1)) {
+      selected.forEach(name => unconverted.add(name)); continue;
+    }
 
-    const resultOperator = fill ? paintOp : paintOp.toUpperCase();
+    const resultOperator = fill ? 'k' : 'K';
     replacements.push({ start, end, value: `${result.map(value => +value.toFixed(5)).join(' ')} ${resultOperator}` });
     selected.forEach(name => converted.add(name));
   }
@@ -125,7 +108,7 @@ function encodeStreamText(stream, context, text) {
 
 /**
  * Converts operator-selected Separation/DeviceN spots to their declared
- * CMYK/Gray/RGB equivalent across every page and nested Form XObject, then
+ * DeviceCMYK equivalent across every page and nested Form XObject, then
  * removes the now-unused colorspace resource entries. Returns which spot
  * names were converted everywhere they appeared, and which were left alone
  * anywhere (an unsupported alternate space, a malformed tint-transform, or

@@ -2,15 +2,8 @@ import opentype from 'opentype.js';
 import { PDFArray, PDFDict, PDFName, PDFNumber, PDFRawStream, decodePDFRawStream } from 'pdf-lib';
 import { contentOperators } from './pdfContent.js';
 
-// Converts embedded-font text runs into filled vector paths ("Create
-// Outlines"). Scope of this increment: simple (FontFile2 TrueType) and
-// Type0/CIDFontType2 (Identity-H, also FontFile2) fonts, horizontal writing,
-// fill-painting render modes only. Everything else - non-embedded fonts (no
-// glyph data exists anywhere to outline from - a correctness wall, not a
-// laziness cut), Type3 fonts, FontFile3/CFF (Type1/CIDFontType0), a
-// non-Identity CMap, vertical writing (Identity-V), and clipping text render
-// modes (Tr 4-7) - is left completely untouched and reported in
-// `unconverted`, never guessed at or approximated.
+// Outlines supported embedded simple, Identity-H CID, and resource-free Type3
+// fonts. Unsupported text objects stay intact and are reported to the operator.
 
 // --- WinAnsiEncoding: codes 32-126 and 160-255 map 1:1 to their Unicode
 // codepoint; only 128-159 deviate from Latin-1 (smart quotes, dashes, etc).
@@ -147,7 +140,7 @@ function formatNumber(value) {
   return Number(value.toFixed(4)).toString();
 }
 
-// Converts an opentype.js glyph path (already normalized to 1 unit = 1 em)
+// Converts an opentype.js glyph path in its original font units
 // into PDF path operators under `transform`, converting TrueType quadratic
 // curves to PDF's cubic `c` operator (done in glyph space, before the affine
 // transform is applied - affine transforms commute with Bezier conversion).
@@ -314,9 +307,7 @@ function parseEmbeddedFont(descriptor, lookup) {
   return font;
 }
 
-// Parses a simple (non-CID) font resource's embedded program and its
-// /Differences map. Returns null (refuse) when nothing opentype.js can parse
-// directly is embedded (non-embedded, or a bare CFF/Type1 program).
+// Parses a simple font's embedded program, encoding differences, and PDF widths.
 function loadSimpleFont(fontDict, lookup) {
   const descriptor = lookup(fontDict.get(PDFName.of('FontDescriptor')));
   const font = parseEmbeddedFont(descriptor, lookup);
@@ -333,7 +324,12 @@ function loadSimpleFont(fontDict, lookup) {
       else { differences.set(code, value.toString().replace(/^\//, '')); code += 1; }
     }
   }
-  return { kind: 'simple', font, differences };
+  const firstChar = lookup(fontDict.get(PDFName.of('FirstChar')))?.asNumber() ?? 0;
+  const widths = lookup(fontDict.get(PDFName.of('Widths')));
+  const missingWidth = lookup(descriptor.get(PDFName.of('MissingWidth')))?.asNumber() ?? 0;
+  const widthForCode = code => widths instanceof PDFArray
+    ? (lookup(widths.get(code - firstChar))?.asNumber() ?? missingWidth) / 1000 : null;
+  return { kind: 'simple', font, differences, widthForCode };
 }
 
 // Parses a Type0/CIDFontType2 (TrueType-based composite) font resource.
@@ -359,7 +355,22 @@ function loadCidFont(fontDict, lookup) {
     const bytes = decodePDFRawStream(cidToGidMap).decode();
     cidToGid = cid => (cid * 2 + 1 < bytes.length ? (bytes[cid * 2] << 8) | bytes[cid * 2 + 1] : 0);
   }
-  return { kind: 'cid', font, cidToGid };
+  const defaultWidth = lookup(descendant.get(PDFName.of('DW')))?.asNumber() ?? 1000;
+  const widths = lookup(descendant.get(PDFName.of('W')));
+  const widthForCode = cid => {
+    for (let i = 0; widths instanceof PDFArray && i < widths.size();) {
+      const first = lookup(widths.get(i++)).asNumber();
+      const next = lookup(widths.get(i++));
+      if (next instanceof PDFArray) {
+        if (cid >= first && cid < first + next.size()) return lookup(next.get(cid - first)).asNumber() / 1000;
+      } else {
+        const width = lookup(widths.get(i++)).asNumber();
+        if (cid >= first && cid <= next.asNumber()) return width / 1000;
+      }
+    }
+    return defaultWidth / 1000;
+  };
+  return { kind: 'cid', font, cidToGid, widthForCode };
 }
 
 // Operators a CharProc could use that need a resource-dict lookup to mean
@@ -369,7 +380,7 @@ function loadCidFont(fontDict, lookup) {
 // font's - silently wrong unless the two happen to share definitions. Rather
 // than merge resource dicts (real complexity, real risk of key collisions),
 // a CharProc using any of these is refused outright.
-const TYPE3_UNSAFE_OPERATORS = new Set(['Do', 'sh', 'gs', 'cs', 'CS']);
+const TYPE3_UNSAFE_OPERATORS = new Set(['Do', 'sh', 'gs', 'cs', 'CS', 'Tf']);
 
 // Parses a Type3 font resource: FontMatrix, the required code->glyph-name
 // Differences (Type3 has no built-in encoding to fall back on), per-code
@@ -442,8 +453,8 @@ function loadFont(fontDict, lookup) {
 }
 
 /**
- * Outlines fill-painting Tj/TJ/'/" calls for operator-selected simple
- * embedded TrueType fonts. `fontCache` maps font dict identity to
+ * Outlines supported text objects for operator-selected embedded fonts.
+ * `fontCache` maps font dict identity to
  * `loadFont()`'s result (or `false` for an already-refused font) and
  * is shared across every content stream in the document so each font is
  * parsed once. `fontNames` is the set of BaseFont names (per the Font
@@ -451,8 +462,9 @@ function loadFont(fontDict, lookup) {
  */
 export function outlineTextInContent(text, resources, lookup, fontNames, fontCache, initialState = {}) {
   const fontsDict = resources instanceof PDFDict && lookup(resources.get(PDFName.of('Font')));
-  let state = { ctm: [1, 0, 0, 1, 0, 0], fontName: null, fontSize: 0, charSpace: 0, wordSpace: 0, hScale: 1, leading: 0, rise: 0, renderMode: 0, ...initialState };
+  let state = { fontName: null, fontSize: 0, charSpace: 0, wordSpace: 0, hScale: 1, leading: 0, rise: 0, renderMode: 0, ...initialState };
   let textMatrix = null, lineMatrix = null;
+  let objectReplacements = [], objectFonts = new Set(), objectRefused = false;
   const stack = [];
   const replacements = [];
   const draws = [];
@@ -471,10 +483,18 @@ export function outlineTextInContent(text, resources, lookup, fontNames, fontCac
   for (const { operator, args, start, end } of contentOperators(text)) {
     if (operator === 'q') { stack.push({ ...state }); continue; }
     if (operator === 'Q') { state = stack.pop() || state; continue; }
-    if (operator === 'cm' && args.length === 6 && args.every(Number.isFinite)) { state.ctm = multiplyMatrix(args, state.ctm); continue; }
-    if (operator === 'Do' && typeof args[0] === 'string') { draws.push({ name: args[0].slice(1), ctm: state.ctm }); continue; }
-    if (operator === 'BT') { textMatrix = [1, 0, 0, 1, 0, 0]; lineMatrix = [1, 0, 0, 1, 0, 0]; continue; }
-    if (operator === 'ET') { textMatrix = null; lineMatrix = null; continue; }
+    if (operator === 'Do' && typeof args[0] === 'string') { draws.push({ name: args[0].slice(1) }); continue; }
+    if (operator === 'BT') {
+      textMatrix = [1, 0, 0, 1, 0, 0]; lineMatrix = textMatrix;
+      objectReplacements = []; objectFonts = new Set(); objectRefused = false;
+      continue;
+    }
+    if (operator === 'ET') {
+      if (!objectRefused) replacements.push(...objectReplacements);
+      objectFonts.forEach(name => (objectRefused ? unconverted : converted).add(name));
+      textMatrix = null; lineMatrix = null;
+      continue;
+    }
     if (operator === 'Tf') { state.fontName = args[0]; state.fontSize = args[1]; continue; }
     if (operator === 'Tc') { state.charSpace = args[0]; continue; }
     if (operator === 'Tw') { state.wordSpace = args[0]; continue; }
@@ -488,20 +508,24 @@ export function outlineTextInContent(text, resources, lookup, fontNames, fontCac
     if (operator === 'T*' && lineMatrix) { lineMatrix = multiplyMatrix([1, 0, 0, 1, 0, -state.leading], lineMatrix); textMatrix = lineMatrix; continue; }
     if (!['Tj', 'TJ', "'", '"'].includes(operator) || !textMatrix) continue;
 
-    // Clipping modes (4-7) add to the clip path instead of painting; outside
-    // this increment's scope. Mode 3 (invisible) and 7 (clip-only) paint
-    // nothing today either way, so leaving them untouched changes nothing.
-    if (state.renderMode !== 0 && state.renderMode !== 2) continue;
-
     const fontInfo = getFont(state.fontName);
-    if (!fontInfo || !fontNames.has(fontInfo.baseFontName)) continue; // never convert a font the operator didn't select
-    if (!fontInfo.loaded) { unconverted.add(fontInfo.baseFontName); continue; }
-    const { font, kind, differences, cidToGid, fontMatrix } = fontInfo.loaded;
+    // shortcut: mixed selections in one BT/ET are refused, upgrade with full text-state reconstruction.
+    if (!fontInfo || !fontNames.has(fontInfo.baseFontName)) { objectRefused = true; continue; }
+    objectFonts.add(fontInfo.baseFontName);
+    if (!fontInfo.loaded || ![0, 2].includes(state.renderMode)) { objectRefused = true; continue; }
+    const { font, kind, differences, cidToGid, fontMatrix, widthForCode } = fontInfo.loaded;
 
     const raw = text.slice(start, end);
     const items = parseShowTextOperands(raw);
     let charSpace = state.charSpace, wordSpace = state.wordSpace;
-    if (operator === '"') { const numbers = items.filter(item => item.type === 'number'); [wordSpace, charSpace] = [numbers[0]?.value ?? wordSpace, numbers[1]?.value ?? charSpace]; }
+    if (operator === '"') {
+      wordSpace = items.shift()?.value ?? wordSpace; charSpace = items.shift()?.value ?? charSpace;
+      state.wordSpace = wordSpace; state.charSpace = charSpace;
+    }
+    if (operator === '"' || operator === "'") {
+      lineMatrix = multiplyMatrix([1, 0, 0, 1, 0, -state.leading], lineMatrix);
+      textMatrix = lineMatrix;
+    }
 
     // Resolve every glyph before committing to a rewrite - a single
     // unresolved character means the whole call is refused, not partially
@@ -517,7 +541,7 @@ export function outlineTextInContent(text, resources, lookup, fontNames, fontCac
           const gid = cidToGid ? cidToGid(cid) : cid;
           const glyph = gid < font.glyphs.length ? font.glyphs.get(gid) : null;
           if (!glyph) { resolvable = false; break; }
-          runs.push({ kind: 'glyph', glyph, isSpace: false }); // word spacing never applies to multi-byte CID codes
+          runs.push({ kind: 'glyph', glyph, width: widthForCode(cid), isSpace: false }); // word spacing never applies to multi-byte CID codes
         }
       } else if (kind === 'type3') {
         for (const code of item.bytes) {
@@ -529,12 +553,12 @@ export function outlineTextInContent(text, resources, lookup, fontNames, fontCac
         for (const code of item.bytes) {
           const glyph = resolveSimpleGlyph(font, code, differences);
           if (!glyph) { resolvable = false; break; }
-          runs.push({ kind: 'glyph', glyph, isSpace: code === 32 });
+          runs.push({ kind: 'glyph', glyph, width: widthForCode(code), isSpace: code === 32 });
         }
       }
       if (!resolvable) break;
     }
-    if (!resolvable) { unconverted.add(fontInfo.baseFontName); continue; }
+    if (!resolvable) { objectRefused = true; continue; }
 
     const unitsPerEm = kind === 'type3' ? null : font.unitsPerEm;
     const pieces = [];
@@ -550,17 +574,18 @@ export function outlineTextInContent(text, resources, lookup, fontNames, fontCac
         // A CharProc paints itself (its own f/S/etc at the end) - inline it
         // wrapped in its own q/cm/Q rather than collecting bare path data,
         // unlike the shared-fill TrueType/CID case below.
-        const [a, b, c, d, e, f] = multiplyMatrix(multiplyMatrix(fontMatrix, renderMatrix), multiplyMatrix(localTm, state.ctm));
+        const [a, b, c, d, e, f] = multiplyMatrix(multiplyMatrix(fontMatrix, renderMatrix), localTm);
         if (run.glyph.body) pieces.push(`q ${[a, b, c, d, e, f].map(formatNumber).join(' ')} cm ${run.glyph.body} Q`);
         const w0 = fontMatrix[0] * run.glyph.width;
         const tx = (w0 * state.fontSize + charSpace + (run.isSpace ? wordSpace : 0)) * state.hScale;
         localTm = multiplyMatrix([1, 0, 0, 1, tx, 0], localTm);
         continue;
       }
-      const transform = multiplyMatrix(multiplyMatrix(renderMatrix, localTm), state.ctm);
-      const path = run.glyph.getPath(0, 0, 1);
+      // Raw font paths use PDF's upward Y axis; getPath() flips Y for canvas.
+      const transform = multiplyMatrix([1 / unitsPerEm, 0, 0, 1 / unitsPerEm, 0, 0], multiplyMatrix(renderMatrix, localTm));
+      const path = run.glyph.path;
       if (path.commands.length) pieces.push(glyphPathOperators(path, transform));
-      const w0 = run.glyph.advanceWidth / unitsPerEm;
+      const w0 = run.width ?? run.glyph.advanceWidth / unitsPerEm;
       const tx = (w0 * state.fontSize + charSpace + (run.isSpace ? wordSpace : 0)) * state.hScale;
       localTm = multiplyMatrix([1, 0, 0, 1, tx, 0], localTm);
     }
@@ -568,9 +593,10 @@ export function outlineTextInContent(text, resources, lookup, fontNames, fontCac
 
     const paintOp = state.renderMode === 2 ? 'B' : 'f';
     const value = kind === 'type3' ? pieces.join(' ') : (pieces.length ? `${pieces.join(' ')} ${paintOp}` : '');
-    replacements.push({ start, end, value });
-    converted.add(fontInfo.baseFontName);
+    // Page/Form matrices still apply at playback; emit paths outside the text object.
+    objectReplacements.push({ start, end, value: `ET q ${value} Q BT` });
   }
+  if (textMatrix) objectFonts.forEach(name => unconverted.add(name));
 
   let output = text;
   for (const { start, end, value } of replacements.slice().reverse()) output = output.slice(0, start) + value + output.slice(end);
@@ -590,9 +616,8 @@ function encodeStreamText(stream, context, text) {
 /**
  * Outlines operator-selected fonts (by BaseFont name) across every page and
  * nested Form XObject. Returns which fonts were converted everywhere their
- * text appeared, and which were left alone anywhere - a non-embedded font,
- * a Type0/CID or Type3 font, vertical text, a clipping render mode, or any
- * character the embedded program couldn't resolve.
+ * text appeared, and which were left alone anywhere because their program,
+ * encoding, render mode, or text-object selection was unsupported.
  */
 export function outlineFontsInPdf(pdfDoc, fontNames) {
   const { context } = pdfDoc;
@@ -601,17 +626,19 @@ export function outlineFontsInPdf(pdfDoc, fontNames) {
   const converted = new Set(), unconverted = new Set();
   const visitedResourceDicts = new Set();
 
-  const processContentList = (streams, resources, ancestors, initialCtm) => {
+  const visitedStreams = [];
+  const processContentList = (streams, resources, ancestors) => {
     for (const stream of streams) {
       if (!(stream instanceof PDFRawStream) || ancestors.has(stream)) continue;
       let text;
       try { text = decodeStreamText(stream); } catch { continue; }
 
-      const result = outlineTextInContent(text, resources, lookup, fontNames, fontCache, { ctm: initialCtm });
+      const result = outlineTextInContent(text, resources, lookup, fontNames, fontCache);
       result.converted.forEach(name => fontNames.has(name) && converted.add(name));
       result.unconverted.forEach(name => fontNames.has(name) && unconverted.add(name));
       if (result.text !== text) encodeStreamText(stream, context, result.text);
       visitedResourceDicts.add(resources);
+      visitedStreams.push({ stream, resources });
 
       const xObjects = resources instanceof PDFDict && lookup(resources.get(PDFName.of('XObject')));
       if (!(xObjects instanceof PDFDict)) continue;
@@ -619,9 +646,7 @@ export function outlineFontsInPdf(pdfDoc, fontNames) {
         const object = lookup(xObjects.get(PDFName.of(draw.name)));
         if (!(object instanceof PDFRawStream) || object.dict.get(PDFName.of('Subtype')) !== PDFName.of('Form')) continue;
         const formResources = lookup(object.dict.get(PDFName.of('Resources'))) || resources;
-        const formMatrix = lookup(object.dict.get(PDFName.of('Matrix')));
-        const matrix = formMatrix instanceof PDFArray ? formMatrix.asArray().map(value => lookup(value).asNumber()) : [1, 0, 0, 1, 0, 0];
-        processContentList([object], formResources, new Set(ancestors).add(stream), multiplyMatrix(matrix, draw.ctm));
+        processContentList([object], formResources, new Set(ancestors).add(stream));
       }
     }
   };
@@ -630,8 +655,17 @@ export function outlineFontsInPdf(pdfDoc, fontNames) {
     const resources = page.node.Resources();
     if (!(resources instanceof PDFDict)) continue;
     const contents = lookup(page.node.get(PDFName.of('Contents')));
-    const streams = contents instanceof PDFArray ? contents.asArray().map(lookup) : [contents];
-    processContentList(streams, resources, new Set(), [1, 0, 0, 1, 0, 0]);
+    let streams = contents instanceof PDFArray ? contents.asArray().map(lookup) : [contents];
+    if (streams.length > 1) {
+      // Contents arrays share text/graphics state, including BT/ET across stream boundaries.
+      let text;
+      try { text = streams.map(decodeStreamText).join('\n'); }
+      catch { fontNames.forEach(name => unconverted.add(name)); continue; }
+      const combined = context.flateStream(Uint8Array.from(text, ch => ch.charCodeAt(0)));
+      page.node.set(PDFName.of('Contents'), context.register(combined));
+      streams = [combined];
+    }
+    processContentList(streams, resources, new Set());
   }
 
   // Without this, a fully-outlined font's resource entry stays in every
@@ -644,6 +678,20 @@ export function outlineFontsInPdf(pdfDoc, fontNames) {
   // `unconverted`, in which case it's excluded here and its entry survives.
   const removable = [...converted].filter(name => !unconverted.has(name));
   if (removable.length) {
+    for (const { stream, resources } of visitedStreams) {
+      const fonts = resources instanceof PDFDict && lookup(resources.get(PDFName.of('Font')));
+      if (!(fonts instanceof PDFDict)) continue;
+      const text = decodeStreamText(stream);
+      const selectors = [...contentOperators(text)].filter(({ operator, args }) => {
+        if (operator !== 'Tf' || typeof args[0] !== 'string') return false;
+        const font = lookup(fonts.get(PDFName.of(args[0].slice(1))));
+        const name = font instanceof PDFDict && lookup(font.get(PDFName.of('BaseFont')))?.toString().replace(/^\//, '').replace(/^[A-Z]{6}\+/, '');
+        return removable.includes(name);
+      });
+      let output = text;
+      for (const { start, end } of selectors.reverse()) output = output.slice(0, start) + output.slice(end);
+      if (output !== text) encodeStreamText(stream, context, output);
+    }
     for (const resources of visitedResourceDicts) {
       const fonts = resources instanceof PDFDict && lookup(resources.get(PDFName.of('Font')));
       if (!(fonts instanceof PDFDict)) continue;

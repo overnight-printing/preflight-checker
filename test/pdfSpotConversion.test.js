@@ -47,6 +47,74 @@ test('convertSpotColorsInContent refuses (reports, does not guess) an unsupporte
   assert.equal(result.converted.size, 0);
 });
 
+test('convertSpotColorsInContent never treats a three-channel Lab ICC profile as RGB', async () => {
+  const doc = await PDFDocument.create();
+  const profile = doc.context.register(doc.context.flateStream('spacLab Lab ', { N: 3 }));
+  const resources = doc.context.obj({ ColorSpace: {
+    Spot1: ['Separation', 'Spot1', ['ICCBased', profile], {
+      FunctionType: 2, Domain: [0, 1], C0: [100, 0, 0], C1: [74.1176, -1, -1], N: 1,
+      Range: [0, 100, -128, 127, -128, 127]
+    }]
+  } });
+  const source = '/Spot1 cs 1 scn 0 0 10 10 re f';
+  const result = convertSpotColorsInContent(source, resources, value => doc.context.lookup(value), new Set(['/Spot1']));
+  assert.equal(result.text, source);
+  assert.deepEqual([...result.unconverted], ['/Spot1']);
+  assert.equal(result.converted.size, 0);
+});
+
+test('convertSpotColorsInContent refuses malformed CMYK tint values', async () => {
+  const doc = await PDFDocument.create();
+  for (const values of [[0, 1, 0], [0, 0, 0, 2]]) {
+    const resources = doc.context.obj({ ColorSpace: {
+      Spot1: ['Separation', 'Spot1', 'DeviceCMYK', { FunctionType: 2, Domain: [0, 1], C0: values, C1: values, N: 1 }]
+    } });
+    const source = '/Spot1 cs 1 scn 0 0 10 10 re f';
+    const result = convertSpotColorsInContent(source, resources, value => doc.context.lookup(value), new Set(['/Spot1']));
+    assert.equal(result.text, source);
+    assert.deepEqual([...result.unconverted], ['/Spot1']);
+  }
+});
+
+test('convertSpotColorsToCmyk preserves unselected foil content and its resource', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([100, 100]);
+  const tint = { FunctionType: 2, Domain: [0, 1], C0: [0, 0, 0, 0], C1: [0, 0, 0, 1], N: 1 };
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ ColorSpace: {
+    Ink: ['Separation', 'PANTONE 877 U', 'DeviceCMYK', tint],
+    Foil: ['Separation', 'SILVER FOIL', 'DeviceCMYK', tint]
+  } }));
+  const foilContent = '/Foil cs 1 scn 50 50 10 10 re f';
+  const content = doc.context.register(doc.context.flateStream(`/Ink cs 1 scn 0 0 10 10 re f ${foilContent}`));
+  page.node.set(PDFName.of('Contents'), content);
+
+  const { converted, unconverted } = convertSpotColorsToCmyk(doc, new Set(['/PANTONE#20877#20U']));
+  assert.deepEqual([...converted], ['/PANTONE#20877#20U']);
+  assert.equal(unconverted.size, 0);
+  assert.ok(streamText(doc, content).endsWith(foilContent));
+  const spaces = page.node.Resources().lookup(PDFName.of('ColorSpace'));
+  assert.equal(spaces.get(PDFName.of('Ink')), undefined);
+  assert.ok(spaces.get(PDFName.of('Foil')) instanceof PDFArray);
+});
+
+test('convertSpotColorsInContent refuses a partial DeviceN selection without changing either ink', async () => {
+  const doc = await PDFDocument.create();
+  const tint = doc.context.register(doc.context.flateStream('{ pop 0 0 0 }', {
+    FunctionType: 4, Domain: [0, 1, 0, 1], Range: [0, 1, 0, 1, 0, 1, 0, 1]
+  }));
+  const resources = doc.context.obj({ ColorSpace: {
+    Mixed: ['DeviceN', ['Spot1', 'SILVER FOIL'], 'DeviceCMYK', tint]
+  } });
+  const source = '/Mixed cs 1 0.5 scn 0 0 10 10 re f';
+  const result = convertSpotColorsInContent(source, resources, value => doc.context.lookup(value), new Set(['/Spot1']));
+  assert.equal(result.text, source);
+  assert.equal(result.converted.size, 0);
+  assert.deepEqual([...result.unconverted], ['/Spot1']);
+  const allSelected = convertSpotColorsInContent(source, resources, value => doc.context.lookup(value), new Set(['/Spot1', '/SILVER#20FOIL']));
+  assert.equal(allSelected.text, '/Mixed cs 1 0 0 0 k 0 0 10 10 re f');
+  assert.equal(allSelected.converted.size, 2);
+});
+
 test('convertSpotColorsInContent restores colorspace state across q/Q', () => {
   return PDFDocument.create().then(doc => {
     const resources = doc.context.obj({ ColorSpace: {

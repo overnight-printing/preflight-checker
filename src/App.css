@@ -2332,6 +2332,7 @@ summary:focus-visible {
 .app-notice span { flex: 1; overflow-wrap: anywhere; }
 .app-notice.error { color: var(--danger); }
 .app-notice.success { color: var(--success); }
+.app-notice.warning { color: var(--warning); }
 .app-notice button:not(.btn) { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 6px; color: inherit; background: transparent; cursor: pointer; }
 .app-notice .btn { flex-shrink: 0; }
 .upload-error { display: flex; align-items: center; gap: 6px; }
@@ -2353,6 +2354,7 @@ fieldset:disabled { opacity: 0.65; }
   .workspace { flex-direction: column; height: auto; overflow: visible; }
   .editor-pane { flex: none !important; width: 100%; height: 55dvh !important; min-height: 360px !important; }
   .control-sidebar { width: 100%; min-width: 0; max-height: none; border-left: 0; border-right: 0; border-top: 1px solid var(--border-color); }
+  .sidebar-edge-toggle { top: 24px; right: 8px; left: auto; }
   .tool-controls { overflow: visible; }
   .export-area { position: static; }
   .canvas-workspace { padding: 8px; }

@@ -160,7 +160,7 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
     assert.equal(await page.getByRole('img', { name: 'Trim guide', exact: true }).count(), 1);
     assert.equal(await page.getByRole('img', { name: 'Safe area guide', exact: true }).count(), 1);
     assert.deepEqual(await page.locator('.artwork-canvas canvas').evaluate(canvas => [canvas.width, canvas.height]), [540, 378]);
-    await page.getByRole('button', { name: 'Stamper Settings', exact: true }).click();
+
     assert.equal(await page.getByRole('checkbox', { name: 'Crop to trim box', exact: true }).isChecked(), false);
     await page.getByRole('checkbox', { name: 'Add mirror bleed', exact: true }).check();
     await page.getByRole('checkbox', { name: 'Add crop marks', exact: true }).check();
@@ -214,7 +214,7 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
     await upload().setInputFiles(out + '/crop-marks-annotated.pdf');
     await loaded();
     await page.getByRole('checkbox', { name: 'Add crop marks', exact: true }).check();
-    await page.getByRole('button', { name: 'Preflight', exact: true }).click();
+
     await page.getByRole('button', { name: 'Check production output', exact: true }).click();
     await page.getByText(/Checked production output/).waitFor();
     const reportDownload = page.waitForEvent('download');
@@ -224,9 +224,9 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
     assert.equal(report.cropMarksEnabled, true);
     assert.equal(report.cropMarkReviews[1].detected, true);
     assert.equal(report.checks.interactiveContent.status, 'warning');
-    await page.getByRole('button', { name: 'Stamper Settings', exact: true }).click();
+
     await page.getByRole('checkbox', { name: 'Add crop marks', exact: true }).uncheck();
-    await page.getByRole('button', { name: 'Preflight', exact: true }).click();
+
     assert.equal(await page.getByText(/Checked production output/).count(), 0);
     // Optional local customer regression; the private 23 MB artwork is never checked into Git.
     if (process.env.PREFLIGHT_RMD_SAMPLE) {

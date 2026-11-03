@@ -392,11 +392,9 @@ export async function stitchBugToPDF(
   isCropMode = false,
   { cropMarksEnabled = false } = {}
 ) {
-  const originalBytes = await getPdfBytes(originalPDFFile);
   const pdfDoc = await getPdfDocument(originalPDFFile, true);
 
   const rebuild = requiresRebuiltPdfOutput({ bleedAmount, trimCropEnabled, manualCropAmount, isCropMode, cropMarksEnabled });
-  if (!bugEnabled && !rebuild) return new Uint8Array(originalBytes);
   const pages = pdfDoc.getPages();
   const pagesToStitch = targetPages ?? [currentPageIndex];
   if (bugEnabled && !bugFile) throw new Error('Load a Union Bug PDF before exporting.');
@@ -453,6 +451,9 @@ export async function stitchBugToPDF(
       }
     }
 
+    // Production output needs rendered artwork, not private source-application editing data.
+    for (const page of pages) page.node.delete(PDFName.of('PieceInfo'));
+    pdfDoc.catalog.delete(PDFName.of('PieceInfo'));
     await removeOrphanedObjects(pdfDoc);
     return await pdfDoc.save({ useObjectStreams: true });
   }
