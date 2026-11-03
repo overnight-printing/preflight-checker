@@ -23,6 +23,7 @@ import { createPDFPageEmbedder } from './pdfPageEmbedding';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { getPdfBytes, getPdfDocument } from './pdfSource.js';
 import { tintStampContent } from './pdfStampColor.js';
+import { removeOrphanedObjects } from './pdfGarbageCollect.js';
 import { getCropMarkLines } from './cropMarks.js';
 
 // Ship the matching worker with the app, including deployments under a base path.
@@ -452,6 +453,7 @@ export async function stitchBugToPDF(
       }
     }
 
+    await removeOrphanedObjects(pdfDoc);
     return await pdfDoc.save({ useObjectStreams: true });
   }
 
@@ -510,5 +512,6 @@ export async function stitchBugToPDF(
     }
   }
 
+  await removeOrphanedObjects(outputDoc);
   return await outputDoc.save({ useObjectStreams: true });
 }

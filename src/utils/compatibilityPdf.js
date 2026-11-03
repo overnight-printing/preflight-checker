@@ -2,6 +2,7 @@ import { PDFDocument, PDFName } from 'pdf-lib';
 import { AnnotationMode } from 'pdfjs-dist';
 import { getCompatibilityRenderSize, summarizeCompatibilityFit } from './compatibilityGeometry.js';
 import { getPdfDocument } from './pdfSource.js';
+import { removeOrphanedObjects } from './pdfGarbageCollect.js';
 
 // Cheap, pre-render feasibility check: tells the caller which DPI (600, 300, or
 // neither) actually fits before any canvas work starts, instead of letting the
@@ -110,5 +111,6 @@ export async function createCompatibilityArtworkPdf(file, pdfjsDocument, dpi = 6
   }
   output.setTitle(`${file.name} — compatibility artwork (${dpi} DPI RGB)`);
   output.setProducer('Overnight Preflight Tool: explicit appearance rasterization');
+  await removeOrphanedObjects(output);
   return output.save({ useObjectStreams: true });
 }
