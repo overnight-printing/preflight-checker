@@ -4,6 +4,8 @@ import { rotatedSize } from './pdfGeometry.js';
 import { getPdfBytes, getPdfDocument } from './pdfSource.js';
 import { scanContent, multiplyLinearMatrices } from './pdfContent.js';
 import { normalizePrintRequirements, getPrintDocumentChecks, getOrderTrim } from './printRequirements.js';
+import { convertSpotColorsToCmyk } from './pdfSpotConversion.js';
+import { removeOrphanedObjects } from './pdfGarbageCollect.js';
 
 /**
  * Runs print checks against the selected job requirements.
@@ -428,11 +430,12 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
 
   // Update Spot Colors Status
   if (spotColorsFound.size > 0) {
+    const convertibleSpots = Array.from(spotColorsFound).filter(name => !['All', 'None'].includes(name));
     results.checks.spotColors = {
       status: registrationPages.size ? 'error' : spotColorsFound.has('All') ? 'warning' : 'info',
-      details: `Spot inks: ${Array.from(spotColorsFound).join(', ')}. Confirm these plates are intended; convert unwanted spots using the printer's color-managed workflow.${spotColorsFound.has('All') ? ` Registration color (/All) prints on every plate.${registrationPages.size ? ` Painted registration artwork on pages ${[...registrationPages].join(', ')} is not identified as printer marks; correct artwork or verify marks in a production PDF editor.` : ' Confirm registration is limited to printer marks.'}` : ''}${spotColorsFound.has('None') ? ' /None prints nothing; confirm invisible artwork is intentional.' : ''}`,
+      details: `Spot inks: ${Array.from(spotColorsFound).join(', ')}. Confirm these plates are intended; convert unwanted spots using the printer's color-managed workflow.${spotColorsFound.has('All') ? ` Registration color (/All) prints on every plate.${registrationPages.size ? ` Painted registration artwork on pages ${[...registrationPages].join(', ')} is not identified as printer marks; correct artwork or verify marks in a production PDF editor.` : ' Confirm registration is limited to printer marks.'}` : ''}${spotColorsFound.has('None') ? ' /None prints nothing; confirm invisible artwork is intentional.' : ''}${convertibleSpots.length ? ' "Convert to CMYK" evaluates each spot\'s own declared tint-transform formula; spots whose alternate space is not Gray/RGB/CMYK are left untouched and reported.' : ''}`,
       value: Array.from(spotColorsFound),
-      fixable: false
+      fixable: convertibleSpots.length > 0
     };
   }
 
@@ -534,4 +537,17 @@ export async function fixOrderBoxes(file, requirements) {
     for (const [name, box] of [['Crop', boxes.bleed], ['Bleed', boxes.bleed], ['Trim', boxes.trim]]) page[`set${name}Box`](box.x, box.y, box.width, box.height);
   }
   return pdfDoc.save();
+}
+
+// Converts every spot in `spotNames` (expected: the convertible subset of a
+// spotColors check's own value, i.e. excluding registration /All and /None)
+// to its declared CMYK/Gray/RGB tint-transform equivalent. Reports which
+// spots actually converted versus which were left untouched (an unsupported
+// alternate space, or a malformed tint-transform) so the caller can tell the
+// operator honestly rather than imply every spot was handled.
+export async function fixSpotColors(file, spotNames) {
+  const pdfDoc = await getPdfDocument(file, true);
+  const { converted, unconverted } = convertSpotColorsToCmyk(pdfDoc, new Set(spotNames.map(name => `/${name}`)));
+  await removeOrphanedObjects(pdfDoc);
+  return { bytes: await pdfDoc.save(), converted: [...converted], unconverted: [...unconverted] };
 }

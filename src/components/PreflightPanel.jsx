@@ -175,6 +175,7 @@ export default function PreflightPanel({
       case 'bleed': return 'Add Mirror Bleed';
       case 'orderBoxes': return 'Set Boxes to Order';
       case 'blankPages': return 'Review and Remove Blank Pages';
+      case 'spotColors': return 'Convert to CMYK';
       default: return 'Apply Repair';
     }
   };
