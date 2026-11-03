@@ -285,6 +285,7 @@
 
 /* Control Sidebar */
 .control-sidebar {
+  position: relative;
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
   max-height: 100%;
@@ -319,25 +320,34 @@
   margin-top: 4px;
 }
 
-.sidebar-collapse-toggle {
+/* A small round button that floats half-on/half-off the sidebar's border,
+   vertically centered - same affordance as Canva's panel-collapse control. */
+.sidebar-edge-toggle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: transparent;
+  border-radius: 50%;
+  background: var(--bg-surface);
   color: var(--text-secondary);
   cursor: pointer;
-  flex-shrink: 0;
+  z-index: 20;
+  box-shadow: var(--shadow-sm);
 }
 
-.sidebar-collapse-toggle:hover {
+.sidebar-edge-toggle:hover {
   color: var(--text-primary);
   background: var(--bg-card-hover);
 }
+
+.sidebar-edge-toggle-left { right: -13px; }
+.sidebar-edge-toggle-right { left: -13px; }
 
 .control-sidebar.collapsed {
   width: 48px;
@@ -346,9 +356,7 @@
 }
 
 .control-sidebar.collapsed .sidebar-header {
-  padding: 14px 10px;
-  justify-content: center;
-  border-bottom: 0;
+  display: none;
 }
 
 .sidebar-content {

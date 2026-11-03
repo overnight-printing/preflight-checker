@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Image as ImageIcon, ClipboardCheck, UploadCloud, Monitor, Moon, Sun, X, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Image as ImageIcon, ClipboardCheck, UploadCloud, Monitor, Moon, Sun, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import UploadZone from './components/UploadZone';
 import EditorCanvas from './components/EditorCanvas';
 import ControlPanel from './components/ControlPanel';
@@ -1439,17 +1439,17 @@ export default function App() {
           <>
             {/* 1. Preflight Sidebar Panel (left) */}
             <aside className={`control-sidebar control-sidebar-left ${leftSidebarCollapsed ? 'collapsed' : ''}`}>
+              <button
+                type="button"
+                className="sidebar-edge-toggle sidebar-edge-toggle-left"
+                onClick={toggleLeftSidebar}
+                title={leftSidebarCollapsed ? 'Expand Preflight' : 'Collapse Preflight'}
+                aria-label={leftSidebarCollapsed ? 'Expand Preflight sidebar' : 'Collapse Preflight sidebar'}
+              >
+                {leftSidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+              </button>
               <div className="sidebar-header">
                 {!leftSidebarCollapsed && <h2>Preflight</h2>}
-                <button
-                  type="button"
-                  className="sidebar-collapse-toggle"
-                  onClick={toggleLeftSidebar}
-                  title={leftSidebarCollapsed ? 'Expand Preflight' : 'Collapse Preflight'}
-                  aria-label={leftSidebarCollapsed ? 'Expand Preflight sidebar' : 'Collapse Preflight sidebar'}
-                >
-                  {leftSidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-                </button>
               </div>
 
               {!leftSidebarCollapsed && <>
@@ -1577,16 +1577,16 @@ export default function App() {
 
             {/* 3. Stamper Sidebar Panel (right) */}
             <aside className={`control-sidebar ${rightSidebarCollapsed ? 'collapsed' : ''}`}>
+              <button
+                type="button"
+                className="sidebar-edge-toggle sidebar-edge-toggle-right"
+                onClick={toggleRightSidebar}
+                title={rightSidebarCollapsed ? 'Expand Stamper' : 'Collapse Stamper'}
+                aria-label={rightSidebarCollapsed ? 'Expand Stamper sidebar' : 'Collapse Stamper sidebar'}
+              >
+                {rightSidebarCollapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+              </button>
               <div className="sidebar-header">
-                <button
-                  type="button"
-                  className="sidebar-collapse-toggle"
-                  onClick={toggleRightSidebar}
-                  title={rightSidebarCollapsed ? 'Expand Stamper' : 'Collapse Stamper'}
-                  aria-label={rightSidebarCollapsed ? 'Expand Stamper sidebar' : 'Collapse Stamper sidebar'}
-                >
-                  {rightSidebarCollapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
-                </button>
                 {!rightSidebarCollapsed && <h2>Stamper</h2>}
               </div>
 
