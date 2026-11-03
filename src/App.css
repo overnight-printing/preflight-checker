@@ -1101,6 +1101,75 @@ input:checked + .slider-switch:before {
   background: rgba(0, 0, 0, 0.05) !important;
 }
 
+.zoom-slider {
+  width: 90px;
+  height: 4px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.zoom-menu-anchor {
+  position: relative;
+}
+
+.zoom-percent-btn {
+  background: transparent;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 45px;
+  text-align: center;
+  cursor: pointer;
+  padding: 4px 2px;
+  border-radius: 6px;
+}
+
+.zoom-percent-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-theme="light"] .zoom-percent-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.zoom-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  min-width: 100px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  padding: 6px;
+  z-index: 30;
+}
+
+.zoom-menu button {
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text-primary);
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.zoom-menu button:hover {
+  background: var(--bg-card-hover);
+}
+
+.zoom-menu-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 2px;
+}
+
 /* Advanced Settings Collapsible */
 .advanced-settings-wrapper {
   padding: 20px 24px;

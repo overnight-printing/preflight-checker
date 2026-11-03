@@ -1,6 +1,8 @@
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react';
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import { CROP_MARK_MARGIN, getCropMarkLines } from '../utils/cropMarks.js';
+
+const ZOOM_PRESETS = [300, 200, 125, 100, 75, 50, 25, 10];
 
 export default function EditorCanvas({
   artworkCanvas, // HTMLCanvasElement of the artwork
@@ -31,6 +33,8 @@ export default function EditorCanvas({
   onWorkspaceClick
 }) {
   const containerRef = useRef(null);
+  const scrollRef = useRef(null);
+  const pendingScrollAnchorRef = useRef(null);
   const canvasMountRef = useRef(null);
   
   const [isDragging, setIsDragging] = useState(false);
@@ -39,6 +43,8 @@ export default function EditorCanvas({
   const [bugStartPos, setBugStartPos] = useState({ left: 0, top: 0 });
   const [bugStartSize, setBugStartSize] = useState({ width: 0, height: 0 });
   const [aspectRatio, setAspectRatio] = useState(1.0);
+  const [isZoomMenuOpen, setIsZoomMenuOpen] = useState(false);
+  const zoomMenuRef = useRef(null);
 
   const canvasWidth = artworkCanvas ? artworkCanvas.width : 0;
   const canvasHeight = artworkCanvas ? artworkCanvas.height : 0;
@@ -146,6 +152,40 @@ export default function EditorCanvas({
     observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, [artworkCanvas, artworkFile, handleFitToHeight]);
+
+  // Zoom in/out keeps whatever point is currently at the center of the
+  // viewport fixed, instead of leaving scroll position untouched (which
+  // reads as the view "jumping" toward one corner as content grows/shrinks).
+  const zoomTo = useCallback((nextZoom) => {
+    const clamped = Math.min(3, Math.max(0.01, nextZoom));
+    const el = scrollRef.current;
+    if (el && clamped !== zoom) {
+      const ratio = clamped / zoom;
+      pendingScrollAnchorRef.current = {
+        left: (el.scrollLeft + el.clientWidth / 2) * ratio - el.clientWidth / 2,
+        top: (el.scrollTop + el.clientHeight / 2) * ratio - el.clientHeight / 2
+      };
+    }
+    onZoomChange(clamped);
+  }, [zoom, onZoomChange]);
+
+  useLayoutEffect(() => {
+    const anchor = pendingScrollAnchorRef.current;
+    if (anchor && scrollRef.current) {
+      scrollRef.current.scrollLeft = anchor.left;
+      scrollRef.current.scrollTop = anchor.top;
+      pendingScrollAnchorRef.current = null;
+    }
+  }, [zoom]);
+
+  useEffect(() => {
+    if (!isZoomMenuOpen) return;
+    const handleOutsideClick = (event) => {
+      if (zoomMenuRef.current && !zoomMenuRef.current.contains(event.target)) setIsZoomMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [isZoomMenuOpen]);
 
   const moveWithKeyboard = (event) => {
     const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
@@ -261,6 +301,7 @@ export default function EditorCanvas({
   return (
     <div className="canvas-workspace" ref={containerRef} onClick={onWorkspaceClick}>
       <div
+        ref={scrollRef}
         style={{
           width: '100%',
           height: '100%',
@@ -395,9 +436,39 @@ export default function EditorCanvas({
           zIndex: 20
         }}
       >
-        <button className="zoom-btn" onClick={() => onZoomChange(Math.max(0.01, zoom - 0.1))} aria-label="Zoom out" disabled={zoom <= 0.01} title="Zoom Out"><ZoomOut size={16} /></button>
-        <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', minWidth: '45px', textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
-        <button className="zoom-btn" onClick={() => onZoomChange(Math.min(3.0, zoom + 0.1))} aria-label="Zoom in" disabled={zoom >= 3} title="Zoom In"><ZoomIn size={16} /></button>
+        <button className="zoom-btn" onClick={() => zoomTo(zoom - 0.1)} aria-label="Zoom out" disabled={zoom <= 0.01} title="Zoom Out"><ZoomOut size={16} /></button>
+        <input
+          type="range"
+          className="zoom-slider"
+          min={1}
+          max={300}
+          value={Math.round(zoom * 100)}
+          onChange={event => zoomTo(Number(event.target.value) / 100)}
+          aria-label="Zoom level"
+        />
+        <div className="zoom-menu-anchor" ref={zoomMenuRef}>
+          <button
+            type="button"
+            className="zoom-percent-btn"
+            onClick={() => setIsZoomMenuOpen(open => !open)}
+            aria-haspopup="menu"
+            aria-expanded={isZoomMenuOpen}
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          {isZoomMenuOpen && (
+            <div className="zoom-menu" role="menu">
+              {ZOOM_PRESETS.map(percent => (
+                <button key={percent} type="button" role="menuitem" onClick={() => { zoomTo(percent / 100); setIsZoomMenuOpen(false); }}>
+                  {percent}%
+                </button>
+              ))}
+              <div className="zoom-menu-divider" />
+              <button type="button" role="menuitem" onClick={() => { handleFitToHeight(); setIsZoomMenuOpen(false); }}>Fit</button>
+            </div>
+          )}
+        </div>
+        <button className="zoom-btn" onClick={() => zoomTo(zoom + 0.1)} aria-label="Zoom in" disabled={zoom >= 3} title="Zoom In"><ZoomIn size={16} /></button>
         <div style={{ width: '1px', height: '16px', background: 'var(--border-color)' }} />
         <button className="zoom-btn" onClick={handleFitToHeight} aria-label="Fit to screen" title="Fit to Screen"><Maximize2 size={15} /></button>
       </div>
