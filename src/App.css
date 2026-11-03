@@ -1103,8 +1103,47 @@ input:checked + .slider-switch:before {
 
 .zoom-slider {
   width: 90px;
-  height: 4px;
+  height: 16px;
+  margin: 0;
   accent-color: var(--primary);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+/* Firefox renders the track via this pseudo-element even with accent-color set;
+   without an explicit background it can come out fully transparent. */
+.zoom-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-color);
+}
+
+.zoom-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+}
+
+/* WebKit/Blink (Chrome, Safari, Edge) needs the track drawn explicitly too -
+   -webkit-appearance: none above removes the native track along with the fill. */
+.zoom-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-color);
+}
+
+.zoom-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--primary);
   cursor: pointer;
 }
 
