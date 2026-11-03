@@ -19,6 +19,7 @@ const getPdfBytes = async (...args) => (await import('./utils/pdfSource')).getPd
 const normalizePdfTrim = async (...args) => (await import('./utils/normalizePdfTrim')).normalizePdfTrim(...args);
 const fixBlankPage = async (...args) => (await import('./utils/preflightChecker')).fixBlankPage(...args);
 const fixSpotColors = async (...args) => (await import('./utils/preflightChecker')).fixSpotColors(...args);
+const fixFontOutlines = async (...args) => (await import('./utils/preflightChecker')).fixFontOutlines(...args);
 const createCustomerProofPdf = async (...args) => (await import('./utils/customerProof')).createCustomerProofPdf(...args);
 const createPngProofSourcePdf = async (...args) => (await import('./utils/customerProof')).createPngProofSourcePdf(...args);
 const createCompatibilityArtworkPdf = async (...args) => (await import('./utils/compatibilityPdf')).createCompatibilityArtworkPdf(...args);
@@ -887,6 +888,7 @@ export default function App() {
     if (!artworkFile || isBusy || isScanning) return;
     const pagesToRemove = checkKey === 'blankPages' ? preflightResults?.checks?.blankPages?.value || [] : [];
     const spotNames = checkKey === 'spotColors' ? (preflightResults?.checks?.spotColors?.value || []).filter(name => !['All', 'None'].includes(name)) : [];
+    const fontNames = checkKey === 'fontEmbedding' ? (preflightResults?.checks?.fontEmbedding?.value || []) : [];
     if (checkKey === 'blankPages') {
       if (!pagesToRemove.length) return;
       if (pagesToRemove.length >= totalPages) { setNotice({ type: 'error', message: 'At least one page must remain. Remove pages individually in a PDF editor.' }); return; }
@@ -898,6 +900,7 @@ export default function App() {
       let updatedBytes = null;
       let repair = artworkRepair;
       let spotConversionReport = null;
+      let fontOutlineReport = null;
 
       if (checkKey === 'bleed') {
         // Add the job's requested bleed without moving a custom stamp on trim.
@@ -927,6 +930,11 @@ export default function App() {
         const result = await fixSpotColors(artworkFile, spotNames);
         updatedBytes = result.bytes;
         spotConversionReport = result;
+      } else if (checkKey === 'fontEmbedding') {
+        if (!fontNames.length) return;
+        const result = await fixFontOutlines(artworkFile, fontNames);
+        updatedBytes = result.bytes;
+        fontOutlineReport = result;
       }
 
       if (updatedBytes) {
@@ -960,6 +968,8 @@ export default function App() {
           ? `Flattening repair applied at ${compatibilityDpi} DPI in RGB. Repaired page: ${currentPage}. Review the updated preview, then Save Production File. Reset Artwork restores the original.`
           : checkKey === 'spotColors'
           ? `${spotConversionReport.converted.length ? `Converted to CMYK: ${spotConversionReport.converted.join(', ')}.` : 'No spots were converted.'}${spotConversionReport.unconverted.length ? ` Left unchanged (unsupported alternate space or tint-transform): ${spotConversionReport.unconverted.join(', ')}.` : ''} Review the updated checks, then Save Production File. Reset Artwork restores the original.`
+          : checkKey === 'fontEmbedding'
+          ? `${fontOutlineReport.converted.length ? `Outlined to vector paths: ${fontOutlineReport.converted.join(', ')}.` : 'No fonts were outlined.'}${fontOutlineReport.unconverted.length ? ` Left unchanged (unsupported font type/encoding, or unresolved characters): ${fontOutlineReport.unconverted.join(', ')}.` : ''} Review the updated checks, then Save Production File. Reset Artwork restores the original.`
           : 'Repair applied. Review the updated checks, then Save Production File. Reset Artwork restores the original.' });
 
         // Re-run preflight scan to update the UI status

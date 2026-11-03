@@ -176,6 +176,7 @@ export default function PreflightPanel({
       case 'orderBoxes': return 'Set Boxes to Order';
       case 'blankPages': return 'Review and Remove Blank Pages';
       case 'spotColors': return 'Convert to CMYK';
+      case 'fontEmbedding': return 'Create Outlines';
       default: return 'Apply Repair';
     }
   };

@@ -71,6 +71,7 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
   let hasOverprint = false;
   let unmeasuredImages = false;
   const nonEmbeddedFonts = new Set();
+  const embeddedFontsFound = new Set();
   let hasRGBContent = false;
   const rgbPages = new Set(), whiteOverprintPages = new Set(), orderBoxPages = [], orderMismatchPages = [];
   let incompleteContent = false;
@@ -158,6 +159,11 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
 
               if (!isEmbedded) {
                 nonEmbeddedFonts.add(fontName.replace('/', ''));
+              } else {
+                // Strip the random 6-letter subset tag (e.g. "ABCDEF+Helvetica") the
+                // same way pdfFontOutline.js's outlineFontsInPdf does, so a name here
+                // matches what that module reports as converted/unconverted.
+                embeddedFontsFound.add(fontName.replace('/', '').replace(/^[A-Z]{6}\+/, ''));
               }
             }
           }
@@ -355,12 +361,18 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
   }
 
   // Update Font Embedding Status
-  if (nonEmbeddedFonts.size > 0) {
+  if (nonEmbeddedFonts.size > 0 || embeddedFontsFound.size > 0) {
+    const missingDetails = nonEmbeddedFonts.size
+      ? `Missing font programs: ${Array.from(nonEmbeddedFonts).join(', ')}. Embed fonts or outline text in the source application. Rasterizing with substituted fonts does not repair missing fonts.`
+      : '';
+    const embeddedDetails = embeddedFontsFound.size
+      ? `Embedded: ${Array.from(embeddedFontsFound).join(', ')}. "Create Outlines" converts their text to vector paths using each font's own embedded program; any text it can't resolve that way is left untouched and reported.`
+      : '';
     results.checks.fontEmbedding = {
-      status: 'error',
-      details: `Missing font programs: ${Array.from(nonEmbeddedFonts).join(', ')}. Embed fonts or outline text in the source application. Rasterizing with substituted fonts does not repair missing fonts.`,
-      value: Array.from(nonEmbeddedFonts),
-      fixable: false
+      status: nonEmbeddedFonts.size ? 'error' : 'info',
+      details: [missingDetails, embeddedDetails].filter(Boolean).join(' '),
+      value: Array.from(embeddedFontsFound),
+      fixable: embeddedFontsFound.size > 0
     };
   }
 
@@ -548,6 +560,22 @@ export async function fixOrderBoxes(file, requirements) {
 export async function fixSpotColors(file, spotNames) {
   const pdfDoc = await getPdfDocument(file, true);
   const { converted, unconverted } = convertSpotColorsToCmyk(pdfDoc, new Set(spotNames.map(name => `/${name}`)));
+  await removeOrphanedObjects(pdfDoc);
+  return { bytes: await pdfDoc.save(), converted: [...converted], unconverted: [...unconverted] };
+}
+
+// Outlines every font in `fontNames` (expected: a fontEmbedding check's own
+// value, i.e. the embedded-font subset) into vector paths using each font's
+// own embedded program. Reports which fonts converted everywhere their text
+// appeared versus which were left untouched anywhere - a font/encoding this
+// increment doesn't cover (FontFile3/CFF, Type3, vertical writing, a
+// non-Identity CMap) or a character the program couldn't resolve.
+export async function fixFontOutlines(file, fontNames) {
+  // opentype.js is a meaningful chunk of code; load it only when an operator
+  // actually clicks "Create Outlines", not on every preflight scan.
+  const { outlineFontsInPdf } = await import('./pdfFontOutline.js');
+  const pdfDoc = await getPdfDocument(file, true);
+  const { converted, unconverted } = outlineFontsInPdf(pdfDoc, new Set(fontNames));
   await removeOrphanedObjects(pdfDoc);
   return { bytes: await pdfDoc.save(), converted: [...converted], unconverted: [...unconverted] };
 }
