@@ -460,6 +460,7 @@ export function outlineFontsInPdf(pdfDoc, fontNames) {
   const lookup = value => context.lookup(value);
   const fontCache = new Map();
   const converted = new Set(), unconverted = new Set();
+  const visitedResourceDicts = new Set();
 
   const processContentList = (streams, resources, ancestors, initialCtm) => {
     for (const stream of streams) {
@@ -471,6 +472,7 @@ export function outlineFontsInPdf(pdfDoc, fontNames) {
       result.converted.forEach(name => fontNames.has(name) && converted.add(name));
       result.unconverted.forEach(name => fontNames.has(name) && unconverted.add(name));
       if (result.text !== text) encodeStreamText(stream, context, result.text);
+      visitedResourceDicts.add(resources);
 
       const xObjects = resources instanceof PDFDict && lookup(resources.get(PDFName.of('XObject')));
       if (!(xObjects instanceof PDFDict)) continue;
@@ -491,6 +493,28 @@ export function outlineFontsInPdf(pdfDoc, fontNames) {
     const contents = lookup(page.node.get(PDFName.of('Contents')));
     const streams = contents instanceof PDFArray ? contents.asArray().map(lookup) : [contents];
     processContentList(streams, resources, new Set(), [1, 0, 0, 1, 0, 0]);
+  }
+
+  // Without this, a fully-outlined font's resource entry stays in every
+  // Resources dict that declared it - unused by any remaining Tf, but still
+  // "present" as far as the fontEmbedding preflight check can tell, since it
+  // scans resource dictionaries rather than actual Tf usage. That made the
+  // Create Outlines button reappear forever even after a real, complete
+  // conversion. Safe to delete now: every text run using this font anywhere
+  // in the document was either converted or this font would be in
+  // `unconverted`, in which case it's excluded here and its entry survives.
+  const removable = [...converted].filter(name => !unconverted.has(name));
+  if (removable.length) {
+    for (const resources of visitedResourceDicts) {
+      const fonts = resources instanceof PDFDict && lookup(resources.get(PDFName.of('Font')));
+      if (!(fonts instanceof PDFDict)) continue;
+      for (const key of fonts.keys()) {
+        const fontDict = lookup(fonts.get(key));
+        if (!(fontDict instanceof PDFDict)) continue;
+        const baseFontName = lookup(fontDict.get(PDFName.of('BaseFont')))?.toString().replace(/^\//, '').replace(/^[A-Z]{6}\+/, '');
+        if (removable.includes(baseFontName)) fonts.delete(key);
+      }
+    }
   }
 
   return { converted, unconverted };

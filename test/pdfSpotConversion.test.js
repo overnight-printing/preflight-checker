@@ -79,8 +79,10 @@ test('convertSpotColorsToCmyk converts a spot across the page and a nested Form 
   assert.deepEqual([...converted], ['/Spot1']);
   assert.equal(unconverted.size, 0);
 
-  assert.equal(streamText(doc, pageContent), '/Spot1 cs 0 0 0 1 k 0 0 10 10 re f /Fm0 Do');
-  assert.equal(streamText(doc, formStream), '/Spot1 cs 0 0 0 1 k 0 0 5 5 re f');
+  // The cs selector itself is stripped too, not just the scn - otherwise it
+  // would dangle, pointing at the Separation resource entry deleted below.
+  assert.equal(streamText(doc, pageContent), ' 0 0 0 1 k 0 0 10 10 re f /Fm0 Do');
+  assert.equal(streamText(doc, formStream), ' 0 0 0 1 k 0 0 5 5 re f');
 
   // Resource cleanup: the now-unused Separation entry is gone from both scopes.
   assert.equal(page.node.Resources().lookup(PDFName.of('ColorSpace')).get(PDFName.of('Spot1')), undefined);

@@ -56,6 +56,27 @@ test('outlineFontsInPdf converts a simple Tj call for a selected embedded TrueTy
   // rect glyph: 1 moveto + 3 lineto, no explicit close (TrueType contours decode without a literal Z)
   assert.equal((text.match(/ m\b/g) || []).length, 1);
   assert.equal((text.match(/ l\b/g) || []).length, 3);
+
+  // Without this, the fontEmbedding preflight check (which scans resource
+  // dicts, not actual Tf usage) would see the font as still "present" and
+  // keep offering Create Outlines forever, even though its text was already
+  // converted - this is the bug a real user hit.
+  assert.equal(page.node.Resources().lookup(PDFName.of('Font')).get(PDFName.of('F1')), undefined);
+});
+
+test('outlineFontsInPdf leaves a font\'s resource entry in place when any of its text was left unconverted', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const fontRef = await embedTestFont(doc, buildTestFont());
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: { F1: fontRef } }));
+  // 'A' resolves (code 65); 'Z' (code 90) has no glyph in the fixture font, so this run is unconvertible.
+  const content = doc.context.register(doc.context.flateStream('BT /F1 10 Tf 0 0 Td (A) Tj 0 0 Td (Z) Tj ET'));
+  page.node.set(PDFName.of('Contents'), content);
+
+  const { converted, unconverted } = outlineFontsInPdf(doc, new Set(['TestFont']));
+  assert.deepEqual([...converted], ['TestFont']);
+  assert.deepEqual([...unconverted], ['TestFont']);
+  assert.ok(page.node.Resources().lookup(PDFName.of('Font')).get(PDFName.of('F1')) !== undefined, 'font resource should survive since not everything converted');
 });
 
 function buildType3FontDict(doc, { charProcBody = '500 0 d0 0 0 500 500 re f', baseFont = 'TestType3' } = {}) {

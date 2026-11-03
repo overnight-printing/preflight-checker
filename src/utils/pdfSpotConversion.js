@@ -86,6 +86,33 @@ export function convertSpotColorsInContent(text, resources, lookup, spotNames, i
   return { text: output, converted, unconverted, fillSpaceName, strokeSpaceName };
 }
 
+// A cs/CS call selecting a spot colorspace that ends up fully converted (see
+// `removable` below) becomes a dangling reference once that colorspace's
+// resource entry is deleted - still present in the stream, pointing at
+// nothing, which some renderers flag as an "unrecognized colorspace" even
+// though nothing downstream still needs it (every scn/SCN using it was
+// already rewritten to a direct g/rg/k operator). Blanked out for the same
+// reason the resource entry itself is deleted: safe only once nothing in the
+// whole document still needs that name.
+function stripDanglingColorSpaceSelectors(text, resources, lookup, removable) {
+  if (!removable.length) return text;
+  const replacements = [];
+  for (const { operator, args, start, end } of contentOperators(text)) {
+    if (operator !== 'cs' && operator !== 'CS') continue;
+    const space = resolveColorSpace(args[0], resources, lookup);
+    if (!(space instanceof PDFArray)) continue;
+    const family = space.get(0)?.toString();
+    if (family !== '/Separation' && family !== '/DeviceN') continue;
+    const namesEntry = lookup(space.get(1));
+    const spotList = (namesEntry instanceof PDFArray ? namesEntry.asArray() : [namesEntry]).map(value => value?.toString());
+    if (spotList.every(name => removable.includes(name))) replacements.push({ start, end, value: '' });
+  }
+  if (!replacements.length) return text;
+  let output = text;
+  for (const { start, end, value } of replacements.slice().reverse()) output = output.slice(0, start) + value + output.slice(end);
+  return output;
+}
+
 function decodeStreamText(stream) {
   return new TextDecoder('latin1').decode(decodePDFRawStream(stream).decode());
 }
@@ -109,6 +136,7 @@ export function convertSpotColorsToCmyk(pdfDoc, spotNames) {
   const lookup = value => context.lookup(value);
   const converted = new Set(), unconverted = new Set();
   const visitedResourceDicts = new Set();
+  const visitedStreams = [];
 
   const processContentList = (streams, resources, ancestors, initialState) => {
     let state = initialState;
@@ -123,6 +151,7 @@ export function convertSpotColorsToCmyk(pdfDoc, spotNames) {
       if (result.text !== text) encodeStreamText(stream, context, result.text);
       state = { fillSpaceName: result.fillSpaceName, strokeSpaceName: result.strokeSpaceName };
       visitedResourceDicts.add(resources);
+      visitedStreams.push({ stream, resources });
 
       const xObjects = resources instanceof PDFDict && lookup(resources.get(PDFName.of('XObject')));
       if (!(xObjects instanceof PDFDict)) continue;
@@ -149,6 +178,12 @@ export function convertSpotColorsToCmyk(pdfDoc, spotNames) {
   // Separation/DeviceN resource entry is removable only if every spot name it
   // names was converted and never left unconverted anywhere in the document.
   const removable = [...converted].filter(name => !unconverted.has(name));
+  for (const { stream, resources } of visitedStreams) {
+    let text;
+    try { text = decodeStreamText(stream); } catch { continue; }
+    const stripped = stripDanglingColorSpaceSelectors(text, resources, lookup, removable);
+    if (stripped !== text) encodeStreamText(stream, context, stripped);
+  }
   for (const resources of visitedResourceDicts) {
     const spaces = lookup(resources.get(PDFName.of('ColorSpace')));
     if (!(spaces instanceof PDFDict)) continue;
