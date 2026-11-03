@@ -396,6 +396,8 @@ export async function stitchBugToPDF(
 
   const rebuild = requiresRebuiltPdfOutput({ bleedAmount, trimCropEnabled, manualCropAmount, isCropMode, cropMarksEnabled });
   const pages = pdfDoc.getPages();
+  const hasPrivateEditingData = pdfDoc.catalog.has(PDFName.of('PieceInfo')) || pages.some(page => page.node.has(PDFName.of('PieceInfo')));
+  if (!bugEnabled && !rebuild && !hasPrivateEditingData) return new Uint8Array(await getPdfBytes(originalPDFFile));
   const pagesToStitch = targetPages ?? [currentPageIndex];
   if (bugEnabled && !bugFile) throw new Error('Load a Union Bug PDF before exporting.');
   if (isCropMode) throw new Error('Visual cropping is unavailable. Use TrimBox cropping and manual inset.');
