@@ -22,9 +22,13 @@ function buildTestFont() {
   return new Uint8Array(font.toArrayBuffer());
 }
 
-async function embedTestFont(doc, ttfBytes, { baseFont = 'TestFont', differences = null } = {}) {
-  const fontFile = doc.context.register(doc.context.flateStream(ttfBytes, { Length1: ttfBytes.length }));
-  const descriptor = doc.context.register(doc.context.obj({ Type: 'FontDescriptor', FontName: baseFont, Flags: 32, FontFile2: fontFile }));
+async function embedTestFont(doc, ttfBytes, { baseFont = 'TestFont', differences = null, wrapAsFontFile3OpenType = false } = {}) {
+  const fontFile = wrapAsFontFile3OpenType
+    ? doc.context.register(doc.context.flateStream(ttfBytes, { Subtype: 'OpenType' }))
+    : doc.context.register(doc.context.flateStream(ttfBytes, { Length1: ttfBytes.length }));
+  const descriptorEntries = { Type: 'FontDescriptor', FontName: baseFont, Flags: 32 };
+  descriptorEntries[wrapAsFontFile3OpenType ? 'FontFile3' : 'FontFile2'] = fontFile;
+  const descriptor = doc.context.register(doc.context.obj(descriptorEntries));
   const fontDict = { Type: 'Font', Subtype: 'TrueType', BaseFont: baseFont, FontDescriptor: descriptor };
   if (differences) fontDict.Encoding = { Differences: differences };
   return doc.context.register(doc.context.obj(fontDict));
@@ -52,6 +56,20 @@ test('outlineFontsInPdf converts a simple Tj call for a selected embedded TrueTy
   // rect glyph: 1 moveto + 3 lineto, no explicit close (TrueType contours decode without a literal Z)
   assert.equal((text.match(/ m\b/g) || []).length, 1);
   assert.equal((text.match(/ l\b/g) || []).length, 3);
+});
+
+test('outlineFontsInPdf also accepts an sfnt program embedded as FontFile3 /OpenType', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const fontRef = await embedTestFont(doc, buildTestFont(), { wrapAsFontFile3OpenType: true });
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: { F1: fontRef } }));
+  const content = doc.context.register(doc.context.flateStream('BT /F1 10 Tf 0 0 Td (A) Tj ET'));
+  page.node.set(PDFName.of('Contents'), content);
+
+  const { converted, unconverted } = outlineFontsInPdf(doc, new Set(['TestFont']));
+  assert.deepEqual([...converted], ['TestFont']);
+  assert.equal(unconverted.size, 0);
+  assert.ok(!streamText(doc, content).includes('Tj'));
 });
 
 test('outlineFontsInPdf positions a second glyph using the first glyph\'s declared advance width', async () => {

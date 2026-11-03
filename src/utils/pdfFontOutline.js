@@ -149,16 +149,34 @@ function resolveSimpleGlyph(font, code, differences) {
   return null;
 }
 
-// Parses a simple (non-CID) font resource's embedded TrueType program and
-// its /Differences map. Returns null (refuse) when it's not embedded as
-// TrueType (FontFile/FontFile3 - Type1/CFF - is out of this increment's scope).
+// Returns the embedded font program's bytes if opentype.js can parse them
+// directly: FontFile2 (bare TrueType/glyf), or FontFile3 with /Subtype
+// /OpenType (a complete sfnt-wrapped font, TrueType- or CFF-flavored - either
+// way opentype.js parses it the same way). A bare CFF program (FontFile3
+// /Type1C or /CIDFontType0C) has no sfnt wrapper at all - no cmap, head, or
+// hmtx tables - so it isn't something opentype.parse() can read standalone;
+// that stays refused rather than attempting a hand-built sfnt wrapper.
+function getEmbeddedFontBytes(descriptor, lookup) {
+  if (!(descriptor instanceof PDFDict)) return null;
+  const fontFile2 = lookup(descriptor.get(PDFName.of('FontFile2')));
+  if (fontFile2 instanceof PDFRawStream) return decodePDFRawStream(fontFile2).decode();
+  const fontFile3 = lookup(descriptor.get(PDFName.of('FontFile3')));
+  if (fontFile3 instanceof PDFRawStream && fontFile3.dict.get(PDFName.of('Subtype'))?.toString() === '/OpenType') {
+    return decodePDFRawStream(fontFile3).decode();
+  }
+  return null;
+}
+
+// Parses a simple (non-CID) font resource's embedded program and its
+// /Differences map. Returns null (refuse) when nothing opentype.js can parse
+// directly is embedded (non-embedded, or a bare CFF/Type1 program).
 function loadSimpleFont(fontDict, lookup) {
   const descriptor = lookup(fontDict.get(PDFName.of('FontDescriptor')));
-  const fontFile2 = descriptor instanceof PDFDict && lookup(descriptor.get(PDFName.of('FontFile2')));
-  if (!(fontFile2 instanceof PDFRawStream)) return null;
+  const bytes = getEmbeddedFontBytes(descriptor, lookup);
+  if (!bytes) return null;
 
   let font;
-  try { font = opentype.parse(decodePDFRawStream(fontFile2).decode().buffer); }
+  try { font = opentype.parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)); }
   catch { return null; }
 
   const differences = new Map();
@@ -177,20 +195,23 @@ function loadSimpleFont(fontDict, lookup) {
 
 // Parses a Type0/CIDFontType2 (TrueType-based composite) font resource.
 // Scope of this increment: /Identity-H only (the overwhelming majority of
-// subset-embedded CID fonts use it) and CIDFontType2 (FontFile2); a
-// predefined/embedded non-Identity CMap, vertical writing (Identity-V), or a
-// CFF-based CIDFontType0 (FontFile3) are refused, not guessed at.
+// subset-embedded CID fonts use it) and CIDFontType2 (GID indexing works the
+// same whether the program arrives as bare TrueType via FontFile2 or
+// sfnt-wrapped via FontFile3 /OpenType); a predefined/embedded non-Identity
+// CMap, vertical writing (Identity-V), or a CFF-keyed CIDFontType0 (a
+// genuinely different CID-to-GID mechanism, not just a different wrapper)
+// are refused, not guessed at.
 function loadCidFont(fontDict, lookup) {
   if (fontDict.get(PDFName.of('Encoding'))?.toString() !== '/Identity-H') return null;
   const descendants = lookup(fontDict.get(PDFName.of('DescendantFonts')));
   const descendant = descendants instanceof PDFArray && descendants.size() === 1 && lookup(descendants.get(0));
   if (!(descendant instanceof PDFDict) || descendant.get(PDFName.of('Subtype'))?.toString() !== '/CIDFontType2') return null;
   const descriptor = lookup(descendant.get(PDFName.of('FontDescriptor')));
-  const fontFile2 = descriptor instanceof PDFDict && lookup(descriptor.get(PDFName.of('FontFile2')));
-  if (!(fontFile2 instanceof PDFRawStream)) return null;
+  const bytes = getEmbeddedFontBytes(descriptor, lookup);
+  if (!bytes) return null;
 
   let font;
-  try { font = opentype.parse(decodePDFRawStream(fontFile2).decode().buffer); }
+  try { font = opentype.parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)); }
   catch { return null; }
 
   const cidToGidMap = lookup(descendant.get(PDFName.of('CIDToGIDMap')));
