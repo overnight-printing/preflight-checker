@@ -1,3 +1,7 @@
+:root {
+  --sidebar-width: 332px;
+}
+
 .app-container {
   display: flex;
   flex-direction: column;
@@ -281,8 +285,8 @@
 
 /* Control Sidebar */
 .control-sidebar {
-  width: 360px;
-  min-width: 360px;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
   max-height: 100%;
   min-height: 0;
   background: var(--bg-surface);
@@ -915,46 +919,6 @@ input:checked + .slider-switch:before {
   to { transform: rotate(360deg); }
 }
 
-/* Sidebar Tab Switcher */
-.sidebar-tabs {
-  display: flex;
-  width: 100%;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-input);
-}
-
-.tab-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 14px 16px;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.tab-btn:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.tab-btn.active {
-  color: var(--primary-hover);
-  border-bottom-color: var(--primary);
-  background: rgba(168, 85, 247, 0.04);
-}
-
-.tab-btn.active svg {
-  color: var(--primary);
-}
-
 /* Theme Switcher Button Group */
 .theme-switcher {
   display: flex;
@@ -1460,15 +1424,6 @@ input:checked + .slider-switch:before {
   font-weight: 600;
 }
 
-:root[data-theme="light"] .sidebar-tabs {
-  background: #ffffff;
-}
-
-:root[data-theme="light"] .tab-btn.active {
-  color: #176ca7;
-  background: #edf7ff;
-}
-
 :root[data-theme="light"] .segmented-control button.active,
 :root[data-theme="light"] .alignment-grid button.active {
   background: #edf7ff;
@@ -1503,11 +1458,16 @@ input:checked + .slider-switch:before {
 }
 
 .control-sidebar {
-  width: 332px;
-  min-width: 332px;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
   background: var(--bg-surface);
   backdrop-filter: none;
   box-shadow: none;
+}
+
+.control-sidebar-left {
+  border-left: 0;
+  border-right: 1px solid var(--border-color);
 }
 
 .sidebar-header {
@@ -1518,34 +1478,6 @@ input:checked + .slider-switch:before {
 .sidebar-header h2 {
   font-size: 15px;
   font-weight: 650;
-}
-
-.sidebar-tabs {
-  width: auto;
-  margin: 0 16px 12px;
-  padding: 3px;
-  border: 1px solid var(--border-color);
-  border-radius: 9px;
-  background: var(--bg-input);
-}
-
-.tab-btn {
-  min-height: 34px;
-  padding: 7px 10px;
-  border: 0;
-  border-radius: 6px;
-  font-size: 12px;
-}
-
-.tab-btn.active {
-  color: var(--text-primary);
-  border: 0;
-  background: var(--bg-card-hover);
-  box-shadow: var(--shadow-sm);
-}
-
-.tab-btn.active svg {
-  color: var(--primary-hover);
 }
 
 .document-utility {
@@ -2165,9 +2097,8 @@ summary:focus-visible {
 }
 
 @media (max-width: 900px) {
-  .control-sidebar {
-    width: 310px;
-    min-width: 310px;
+  :root {
+    --sidebar-width: 300px;
   }
 
   .geometry-summary-bar span:nth-of-type(2) {
@@ -2269,7 +2200,7 @@ fieldset:disabled { opacity: 0.65; }
   .release-version { display: none; }
   .workspace { flex-direction: column; height: auto; overflow: visible; }
   .editor-pane { flex: none !important; width: 100%; height: 55dvh !important; min-height: 360px !important; }
-  .control-sidebar { width: 100%; min-width: 0; max-height: none; border-left: 0; border-top: 1px solid var(--border-color); }
+  .control-sidebar { width: 100%; min-width: 0; max-height: none; border-left: 0; border-right: 0; border-top: 1px solid var(--border-color); }
   .tool-controls { overflow: visible; }
   .export-area { position: static; }
   .canvas-workspace { padding: 8px; }

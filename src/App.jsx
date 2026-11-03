@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Image as ImageIcon, Sparkles, ClipboardCheck, UploadCloud, Monitor, Moon, Sun, X } from 'lucide-react';
+import { Image as ImageIcon, ClipboardCheck, UploadCloud, Monitor, Moon, Sun, X } from 'lucide-react';
 import UploadZone from './components/UploadZone';
 import EditorCanvas from './components/EditorCanvas';
 import ControlPanel from './components/ControlPanel';
@@ -185,7 +185,6 @@ export default function App() {
   const [proofId, setProofId] = useState('');
 
   // Preflight states
-  const [activeSidebarTab, setActiveSidebarTab] = useState('preflight'); // 'preflight' is default active tab
   const [preflightResults, setPreflightResults] = useState(null);
   const [printRequirements, setPrintRequirements] = useState(DEFAULT_PRINT_REQUIREMENTS);
   const [pdfOutputMode, setPdfOutputMode] = useState('preserve');
@@ -1400,7 +1399,48 @@ export default function App() {
         ) : (
           /* Editor State */
           <>
-            {/* 1. Canvas Area */}
+            {/* 1. Preflight Sidebar Panel (left) */}
+            <aside className="control-sidebar control-sidebar-left">
+              <div className="sidebar-header">
+                <h2>Preflight</h2>
+              </div>
+
+              {/* Mini Upload Zone Cards in Sidebar for replacement */}
+              <div className="document-utility">
+                <span className="document-utility-label">Document</span>
+                <UploadZone
+                  label="Artwork File"
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  onFileSelect={handleArtworkSelect}
+                  selectedFile={artworkFile}
+                  disabled={isExporting || isGeneratingProof}
+                  onClear={handleClearArtwork}
+                  icon={ImageIcon}
+                />
+              </div>
+
+              <fieldset className="tool-controls" disabled={controlsBusy}>
+                <PreflightPanel
+                  currentPage={currentPage}
+                  results={displayedPreflightResults}
+                  isScanning={isScanning}
+                  bleedAmount={effectiveBleedAmount}
+                  compatibilityDpi={compatibilityDpi}
+                  onCompatibilityDpiChange={setCompatibilityDpi}
+                  onRunFullCheck={handleRunFullPreflight}
+                  onCheckProduction={handleCheckProduction}
+                  canCheckProduction={Boolean(canExport)}
+                  onDownloadReport={handleDownloadPreflightReport}
+                  requirements={printRequirements}
+                  onRequirementsChange={requirements => { setPrintRequirements(requirements); setPreflightResults(null); }}
+                  onFix={handlePreflightFix}
+                  onReset={handleResetArtwork}
+                  artworkType={artworkType}
+                />
+              </fieldset>
+            </aside>
+
+            {/* 2. Canvas Area */}
             <div className="editor-pane" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
               {/* Compact PDF Geometry Summary */}
               {geometryDetails && (
@@ -1486,45 +1526,10 @@ export default function App() {
               />
             </div>
 
-            {/* 2. Control Sidebar Panel */}
+            {/* 3. Stamper Sidebar Panel (right) */}
             <aside className="control-sidebar">
               <div className="sidebar-header">
-                <h2>Edit & Adjust</h2>
-                
-              </div>
-
-              {/* Tab Switcher */}
-              <div className="sidebar-tabs" role="group" aria-label="Editor tools">
-                <button 
-                  className={`tab-btn ${activeSidebarTab === 'preflight' ? 'active' : ''}`}
-                  aria-pressed={activeSidebarTab === 'preflight'}
-                  onClick={() => setActiveSidebarTab('preflight')}
-                >
-                  <ClipboardCheck size={14} />
-                  <span>Preflight</span>
-                </button>
-                <button 
-                  className={`tab-btn ${activeSidebarTab === 'stamper' ? 'active' : ''}`}
-                  aria-pressed={activeSidebarTab === 'stamper'}
-                  onClick={() => setActiveSidebarTab('stamper')}
-                >
-                  <Sparkles size={14} />
-                  <span>Stamper Settings</span>
-                </button>
-              </div>
-
-              {/* Mini Upload Zone Cards in Sidebar for replacement */}
-              <div className="document-utility">
-                <span className="document-utility-label">Document</span>
-                <UploadZone
-                  label="Artwork File"
-                  accept=".pdf,.png,.jpg,.jpeg"
-                  onFileSelect={handleArtworkSelect}
-                  selectedFile={artworkFile}
-                  disabled={isExporting || isGeneratingProof}
-                  onClear={handleClearArtwork}
-                  icon={ImageIcon}
-                />
+                <h2>Stamper</h2>
               </div>
 
               <fieldset className="tool-controls" disabled={controlsBusy}>
@@ -1557,8 +1562,7 @@ export default function App() {
                   {artworkRepair && <p className="field-help">RGB repair applied: {Object.entries(artworkRepair.pageDpi).map(([page, dpi]) => `page ${page} at ${dpi} DPI`).join(', ')}. Source vectors, text and ink plates on these pages became pixels. Reset Artwork restores the original PDF.</p>}
                 </div>
               )}
-              {activeSidebarTab === 'stamper' ? (
-                <ControlPanel
+              <ControlPanel
                   colorMode={colorMode}
                   selectedColor={selectedColor}
                   extractedColors={extractedColors}
@@ -1608,25 +1612,6 @@ export default function App() {
                   onClearBug={handleClearBug}
                   isExporting={isExporting}
                 />
-              ) : (
-                <PreflightPanel
-                  currentPage={currentPage}
-                  results={displayedPreflightResults}
-                  isScanning={isScanning}
-                  bleedAmount={effectiveBleedAmount}
-                  compatibilityDpi={compatibilityDpi}
-                  onCompatibilityDpiChange={setCompatibilityDpi}
-                  onRunFullCheck={handleRunFullPreflight}
-                  onCheckProduction={handleCheckProduction}
-                  canCheckProduction={Boolean(canExport)}
-                  onDownloadReport={handleDownloadPreflightReport}
-                  requirements={printRequirements}
-                  onRequirementsChange={requirements => { setPrintRequirements(requirements); setPreflightResults(null); }}
-                  onFix={handlePreflightFix}
-                  onReset={handleResetArtwork}
-                  artworkType={artworkType}
-                />
-              )}
 
               </fieldset>
               {/* Universal Persistent Export Button at bottom of sidebar */}
@@ -1675,7 +1660,7 @@ export default function App() {
                 </div>
                 <button
                   className={`btn btn-action-block ${
-                    activeSidebarTab === 'stamper' || artworkType !== 'pdf' || preflightResults
+                    artworkType !== 'pdf' || preflightResults
                       ? 'btn-primary'
                       : 'btn-secondary'
                   }`}
