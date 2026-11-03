@@ -58,6 +58,72 @@ test('outlineFontsInPdf converts a simple Tj call for a selected embedded TrueTy
   assert.equal((text.match(/ l\b/g) || []).length, 3);
 });
 
+function buildType3FontDict(doc, { charProcBody = '500 0 d0 0 0 500 500 re f', baseFont = 'TestType3' } = {}) {
+  const charProc = doc.context.register(doc.context.flateStream(charProcBody));
+  return doc.context.register(doc.context.obj({
+    Type: 'Font', Subtype: 'Type3', BaseFont: baseFont,
+    FontMatrix: [0.001, 0, 0, 0.001, 0, 0],
+    FontBBox: [0, 0, 500, 500],
+    CharProcs: { square: charProc },
+    Encoding: { Differences: [65, 'square'] },
+    FirstChar: 65, LastChar: 65, Widths: [500]
+  }));
+}
+
+test('outlineFontsInPdf inlines a Type3 CharProc, stripping the leading d0 and transforming via FontMatrix', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const fontRef = buildType3FontDict(doc);
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: { F1: fontRef } }));
+  const content = doc.context.register(doc.context.flateStream('BT /F1 10 Tf 0 0 Td (A) Tj ET'));
+  page.node.set(PDFName.of('Contents'), content);
+
+  const { converted, unconverted } = outlineFontsInPdf(doc, new Set(['TestType3']));
+  assert.deepEqual([...converted], ['TestType3']);
+  assert.equal(unconverted.size, 0);
+
+  const text = streamText(doc, content);
+  assert.ok(!text.includes('Tj'), `expected Tj to be gone: ${text}`);
+  assert.ok(!text.includes('d0'), `expected the d0 operator to be stripped: ${text}`);
+  // FontMatrix [0.001,...] x fontSize 10 => 0.01 scale; CharProc's own "re f" survives verbatim.
+  assert.match(text, /q 0\.01 0 0 0\.01 0 0 cm 0 0 500 500 re f Q/, `unexpected inlined CharProc: ${text}`);
+});
+
+test('outlineFontsInPdf refuses a Type3 font whose CharProc references a named resource', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const fontRef = buildType3FontDict(doc, { charProcBody: '500 0 d0 /Im0 Do' });
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: { F1: fontRef } }));
+  const source = 'BT /F1 10 Tf 0 0 Td (A) Tj ET';
+  const content = doc.context.register(doc.context.flateStream(source));
+  page.node.set(PDFName.of('Contents'), content);
+
+  const { converted, unconverted } = outlineFontsInPdf(doc, new Set(['TestType3']));
+  assert.equal(converted.size, 0);
+  assert.deepEqual([...unconverted], ['TestType3']);
+  assert.equal(streamText(doc, content), source);
+});
+
+test('outlineFontsInPdf refuses a Type3 font with no /Differences (no way to map codes to glyph names)', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const charProc = doc.context.register(doc.context.flateStream('500 0 d0 0 0 500 500 re f'));
+  const fontRef = doc.context.register(doc.context.obj({
+    Type: 'Font', Subtype: 'Type3', BaseFont: 'TestType3NoEncoding',
+    FontMatrix: [0.001, 0, 0, 0.001, 0, 0], FontBBox: [0, 0, 500, 500],
+    CharProcs: { square: charProc }, FirstChar: 65, LastChar: 65, Widths: [500]
+  }));
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: { F1: fontRef } }));
+  const source = 'BT /F1 10 Tf 0 0 Td (A) Tj ET';
+  const content = doc.context.register(doc.context.flateStream(source));
+  page.node.set(PDFName.of('Contents'), content);
+
+  const { converted, unconverted } = outlineFontsInPdf(doc, new Set(['TestType3NoEncoding']));
+  assert.equal(converted.size, 0);
+  assert.deepEqual([...unconverted], ['TestType3NoEncoding']);
+  assert.equal(streamText(doc, content), source);
+});
+
 test('outlineFontsInPdf also accepts an sfnt program embedded as FontFile3 /OpenType', async () => {
   const doc = await PDFDocument.create();
   const page = doc.addPage([200, 200]);

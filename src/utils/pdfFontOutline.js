@@ -223,10 +223,82 @@ function loadCidFont(fontDict, lookup) {
   return { kind: 'cid', font, cidToGid };
 }
 
+// Operators a CharProc could use that need a resource-dict lookup to mean
+// anything (a named colorspace, pattern, XObject, shading, or ExtGState).
+// Inlining a CharProc pastes its body into the page's own content stream, so
+// those names would resolve against the PAGE's resources, not the Type3
+// font's - silently wrong unless the two happen to share definitions. Rather
+// than merge resource dicts (real complexity, real risk of key collisions),
+// a CharProc using any of these is refused outright.
+const TYPE3_UNSAFE_OPERATORS = new Set(['Do', 'sh', 'gs', 'cs', 'CS']);
+
+// Parses a Type3 font resource: FontMatrix, the required code->glyph-name
+// Differences (Type3 has no built-in encoding to fall back on), per-code
+// widths, and each CharProc's own content - verified free of resource-dict
+// references (see TYPE3_UNSAFE_OPERATORS) and with its leading d0/d1 glyph
+// metrics operator stripped, since that isn't a real content-stream operator
+// once inlined into the page's own stream.
+function loadType3Font(fontDict, lookup) {
+  const fontMatrixArray = lookup(fontDict.get(PDFName.of('FontMatrix')));
+  const fontMatrix = fontMatrixArray instanceof PDFArray ? fontMatrixArray.asArray().map(v => v.asNumber()) : null;
+  if (!fontMatrix || fontMatrix.length !== 6) return null;
+
+  const encoding = lookup(fontDict.get(PDFName.of('Encoding')));
+  const diffArray = encoding instanceof PDFDict && lookup(encoding.get(PDFName.of('Differences')));
+  if (!(diffArray instanceof PDFArray)) return null; // no way to map codes to glyph names at all
+
+  const differences = new Map();
+  let code = 0;
+  for (const item of diffArray.asArray()) {
+    const value = lookup(item);
+    if (value instanceof PDFNumber) code = value.asNumber();
+    else { differences.set(code, value.toString().replace(/^\//, '')); code += 1; }
+  }
+
+  const charProcs = lookup(fontDict.get(PDFName.of('CharProcs')));
+  if (!(charProcs instanceof PDFDict)) return null;
+  const firstChar = lookup(fontDict.get(PDFName.of('FirstChar')))?.asNumber() ?? 0;
+  const widthsArray = lookup(fontDict.get(PDFName.of('Widths')));
+  const widths = widthsArray instanceof PDFArray ? widthsArray.asArray().map(v => lookup(v)?.asNumber() ?? 0) : [];
+  const resources = lookup(fontDict.get(PDFName.of('Resources')));
+
+  return { kind: 'type3', fontMatrix, differences, charProcs, firstChar, widths, resources, glyphCache: new Map() };
+}
+
+// Resolves and validates one Type3 glyph (by code), caching the result.
+// Returns null (refuse) if the code has no /Differences name, the name has
+// no CharProc, or the CharProc uses a resource-dependent operator.
+function resolveType3Glyph(type3, code, lookup) {
+  if (type3.glyphCache.has(code)) return type3.glyphCache.get(code);
+  const result = (() => {
+    const name = type3.differences.get(code);
+    if (!name) return null;
+    const stream = lookup(type3.charProcs.get(PDFName.of(name)));
+    if (!(stream instanceof PDFRawStream)) return null;
+    let text;
+    try { text = new TextDecoder('latin1').decode(decodePDFRawStream(stream).decode()); }
+    catch { return null; }
+
+    let bodyStart = 0;
+    for (const op of contentOperators(text)) {
+      if (op.operator === 'd0' || op.operator === 'd1') { bodyStart = op.end; break; }
+      break; // first operator must be d0/d1 per spec; anything else means a malformed CharProc
+    }
+    for (const op of contentOperators(text.slice(bodyStart))) {
+      if (TYPE3_UNSAFE_OPERATORS.has(op.operator)) return null;
+    }
+
+    const width = type3.widths[code - type3.firstChar] ?? 0;
+    return { body: text.slice(bodyStart).trim(), width };
+  })();
+  type3.glyphCache.set(code, result);
+  return result;
+}
+
 function loadFont(fontDict, lookup) {
   const subtype = fontDict.get(PDFName.of('Subtype'))?.toString();
   if (subtype === '/Type0') return loadCidFont(fontDict, lookup);
-  if (subtype === '/Type3') return null; // Type3 "outlining" means inlining CharProcs, not font parsing - deferred
+  if (subtype === '/Type3') return loadType3Font(fontDict, lookup);
   return loadSimpleFont(fontDict, lookup);
 }
 
@@ -285,7 +357,7 @@ export function outlineTextInContent(text, resources, lookup, fontNames, fontCac
     const fontInfo = getFont(state.fontName);
     if (!fontInfo || !fontNames.has(fontInfo.baseFontName)) continue; // never convert a font the operator didn't select
     if (!fontInfo.loaded) { unconverted.add(fontInfo.baseFontName); continue; }
-    const { font, kind, differences, cidToGid } = fontInfo.loaded;
+    const { font, kind, differences, cidToGid, fontMatrix } = fontInfo.loaded;
 
     const raw = text.slice(start, end);
     const items = parseShowTextOperands(raw);
@@ -308,6 +380,12 @@ export function outlineTextInContent(text, resources, lookup, fontNames, fontCac
           if (!glyph) { resolvable = false; break; }
           runs.push({ kind: 'glyph', glyph, isSpace: false }); // word spacing never applies to multi-byte CID codes
         }
+      } else if (kind === 'type3') {
+        for (const code of item.bytes) {
+          const glyph = resolveType3Glyph(fontInfo.loaded, code, lookup);
+          if (!glyph) { resolvable = false; break; }
+          runs.push({ kind: 'type3glyph', glyph, isSpace: code === 32 });
+        }
       } else {
         for (const code of item.bytes) {
           const glyph = resolveSimpleGlyph(font, code, differences);
@@ -319,7 +397,7 @@ export function outlineTextInContent(text, resources, lookup, fontNames, fontCac
     }
     if (!resolvable) { unconverted.add(fontInfo.baseFontName); continue; }
 
-    const unitsPerEm = font.unitsPerEm;
+    const unitsPerEm = kind === 'type3' ? null : font.unitsPerEm;
     const pieces = [];
     let localTm = textMatrix;
     for (const run of runs) {
@@ -329,6 +407,17 @@ export function outlineTextInContent(text, resources, lookup, fontNames, fontCac
         continue;
       }
       const renderMatrix = [state.fontSize * state.hScale, 0, 0, state.fontSize, 0, state.rise];
+      if (run.kind === 'type3glyph') {
+        // A CharProc paints itself (its own f/S/etc at the end) - inline it
+        // wrapped in its own q/cm/Q rather than collecting bare path data,
+        // unlike the shared-fill TrueType/CID case below.
+        const [a, b, c, d, e, f] = multiplyMatrix(multiplyMatrix(fontMatrix, renderMatrix), multiplyMatrix(localTm, state.ctm));
+        if (run.glyph.body) pieces.push(`q ${[a, b, c, d, e, f].map(formatNumber).join(' ')} cm ${run.glyph.body} Q`);
+        const w0 = fontMatrix[0] * run.glyph.width;
+        const tx = (w0 * state.fontSize + charSpace + (run.isSpace ? wordSpace : 0)) * state.hScale;
+        localTm = multiplyMatrix([1, 0, 0, 1, tx, 0], localTm);
+        continue;
+      }
       const transform = multiplyMatrix(multiplyMatrix(renderMatrix, localTm), state.ctm);
       const path = run.glyph.getPath(0, 0, 1);
       if (path.commands.length) pieces.push(glyphPathOperators(path, transform));
@@ -339,7 +428,8 @@ export function outlineTextInContent(text, resources, lookup, fontNames, fontCac
     textMatrix = localTm; // Tj/TJ advance Tm; Tlm (lineMatrix) is untouched per spec
 
     const paintOp = state.renderMode === 2 ? 'B' : 'f';
-    replacements.push({ start, end, value: pieces.length ? `${pieces.join(' ')} ${paintOp}` : '' });
+    const value = kind === 'type3' ? pieces.join(' ') : (pieces.length ? `${pieces.join(' ')} ${paintOp}` : '');
+    replacements.push({ start, end, value });
     converted.add(fontInfo.baseFontName);
   }
 

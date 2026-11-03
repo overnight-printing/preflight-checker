@@ -145,7 +145,11 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
             const subtype = fontObj.get(PDFName.of('Subtype'));
             const fontName = fontObj.get(PDFName.of('BaseFont'))?.toString() || 'Unnamed Font';
             
-            if (subtype !== PDFName.of('Type3')) {
+            if (subtype === PDFName.of('Type3')) {
+              // A Type3 font's CharProcs are its glyph data - there's no separate
+              // font program to be "missing", so it's always reportable as embedded.
+              embeddedFontsFound.add(fontName.replace('/', '').replace(/^[A-Z]{6}\+/, ''));
+            } else {
               const descendants = lookup(fontObj.get(PDFName.of('DescendantFonts')));
               const fontPrograms = descendants instanceof PDFArray
                 ? descendants.asArray().map(lookup) : [fontObj];
