@@ -29,6 +29,49 @@ function winAnsiCodepoint(code) {
   return null;
 }
 
+// Standard WinAnsiEncoding glyph names, needed as a fallback name source
+// (see resolveSimpleGlyph) for fonts with no useful cmap of their own - a
+// bare-CFF program wrapped by wrapBareCffAsOpenType below has no real cmap
+// at all, so without this, only a /Differences-named code could ever resolve.
+const ASCII_GLYPH_NAMES = {
+  32: 'space', 33: 'exclam', 34: 'quotedbl', 35: 'numbersign', 36: 'dollar', 37: 'percent', 38: 'ampersand', 39: 'quotesingle',
+  40: 'parenleft', 41: 'parenright', 42: 'asterisk', 43: 'plus', 44: 'comma', 45: 'hyphen', 46: 'period', 47: 'slash',
+  48: 'zero', 49: 'one', 50: 'two', 51: 'three', 52: 'four', 53: 'five', 54: 'six', 55: 'seven', 56: 'eight', 57: 'nine',
+  58: 'colon', 59: 'semicolon', 60: 'less', 61: 'equal', 62: 'greater', 63: 'question', 64: 'at',
+  91: 'bracketleft', 92: 'backslash', 93: 'bracketright', 94: 'asciicircum', 95: 'underscore', 96: 'grave',
+  123: 'braceleft', 124: 'bar', 125: 'braceright', 126: 'asciitilde'
+};
+for (let c = 65; c <= 90; c++) ASCII_GLYPH_NAMES[c] = String.fromCharCode(c);
+for (let c = 97; c <= 122; c++) ASCII_GLYPH_NAMES[c] = String.fromCharCode(c);
+
+const WIN_ANSI_HIGH_NAMES = {
+  128: 'Euro', 130: 'quotesinglbase', 131: 'florin', 132: 'quotedblbase', 133: 'ellipsis', 134: 'dagger', 135: 'daggerdbl',
+  136: 'circumflex', 137: 'perthousand', 138: 'Scaron', 139: 'guilsinglleft', 140: 'OE', 142: 'Zcaron', 145: 'quoteleft',
+  146: 'quoteright', 147: 'quotedblleft', 148: 'quotedblright', 149: 'bullet', 150: 'endash', 151: 'emdash', 152: 'tilde',
+  153: 'trademark', 154: 'scaron', 155: 'guilsinglright', 156: 'oe', 158: 'zcaron', 159: 'Ydieresis'
+};
+
+const LATIN1_GLYPH_NAMES = {
+  160: 'space', 161: 'exclamdown', 162: 'cent', 163: 'sterling', 164: 'currency', 165: 'yen', 166: 'brokenbar',
+  167: 'section', 168: 'dieresis', 169: 'copyright', 170: 'ordfeminine', 171: 'guillemotleft', 172: 'logicalnot',
+  173: 'hyphen', 174: 'registered', 175: 'macron', 176: 'degree', 177: 'plusminus', 178: 'twosuperior', 179: 'threesuperior',
+  180: 'acute', 181: 'mu', 182: 'paragraph', 183: 'periodcentered', 184: 'cedilla', 185: 'onesuperior', 186: 'ordmasculine',
+  187: 'guillemotright', 188: 'onequarter', 189: 'onehalf', 190: 'threequarters', 191: 'questiondown', 192: 'Agrave',
+  193: 'Aacute', 194: 'Acircumflex', 195: 'Atilde', 196: 'Adieresis', 197: 'Aring', 198: 'AE', 199: 'Ccedilla',
+  200: 'Egrave', 201: 'Eacute', 202: 'Ecircumflex', 203: 'Edieresis', 204: 'Igrave', 205: 'Iacute', 206: 'Icircumflex',
+  207: 'Idieresis', 208: 'Eth', 209: 'Ntilde', 210: 'Ograve', 211: 'Oacute', 212: 'Ocircumflex', 213: 'Otilde',
+  214: 'Odieresis', 215: 'multiply', 216: 'Oslash', 217: 'Ugrave', 218: 'Uacute', 219: 'Ucircumflex', 220: 'Udieresis',
+  221: 'Yacute', 222: 'Thorn', 223: 'germandbls', 224: 'agrave', 225: 'aacute', 226: 'acircumflex', 227: 'atilde',
+  228: 'adieresis', 229: 'aring', 230: 'ae', 231: 'ccedilla', 232: 'egrave', 233: 'eacute', 234: 'ecircumflex',
+  235: 'edieresis', 236: 'igrave', 237: 'iacute', 238: 'icircumflex', 239: 'idieresis', 240: 'eth', 241: 'ntilde',
+  242: 'ograve', 243: 'oacute', 244: 'ocircumflex', 245: 'otilde', 246: 'odieresis', 247: 'divide', 248: 'oslash',
+  249: 'ugrave', 250: 'uacute', 251: 'ucircumflex', 252: 'udieresis', 253: 'yacute', 254: 'thorn', 255: 'ydieresis'
+};
+
+function winAnsiGlyphName(code) {
+  return ASCII_GLYPH_NAMES[code] || WIN_ANSI_HIGH_NAMES[code] || LATIN1_GLYPH_NAMES[code] || null;
+}
+
 function decodeLiteralString(raw) {
   const bytes = [];
   for (let i = 0; i < raw.length; i++) {
@@ -134,10 +177,17 @@ function glyphPathOperators(path, transform) {
 // if nothing can be resolved - the caller treats null as a reason to refuse
 // the whole text-showing operator rather than paint a missing/wrong glyph.
 function resolveSimpleGlyph(font, code, differences) {
-  const name = differences?.get(code);
+  // Try by name first (an explicit /Differences name, falling back to the
+  // base WinAnsiEncoding name for this code) - the only path that works at
+  // all for a bare-CFF-wrapped font, which has no real cmap to speak of.
+  const name = differences?.get(code) || winAnsiGlyphName(code);
   if (name) {
+    // opentype.js's native GlyphNames.nameToGlyphIndex (used for a normal
+    // TrueType 'post' table) returns -1 when not found, Array.indexOf-style
+    // - truthy, unlike the 0-for-not-found convention charToGlyphIndex and
+    // our own attachCffGlyphNameLookup override use. Must exclude it.
     const byName = font.nameToGlyphIndex(name);
-    if (byName) return font.glyphs.get(byName);
+    if (byName > 0) return font.glyphs.get(byName);
   }
   const codepoint = winAnsiCodepoint(code);
   if (codepoint != null) {
@@ -149,22 +199,119 @@ function resolveSimpleGlyph(font, code, differences) {
   return null;
 }
 
-// Returns the embedded font program's bytes if opentype.js can parse them
-// directly: FontFile2 (bare TrueType/glyf), or FontFile3 with /Subtype
-// /OpenType (a complete sfnt-wrapped font, TrueType- or CFF-flavored - either
-// way opentype.js parses it the same way). A bare CFF program (FontFile3
-// /Type1C or /CIDFontType0C) has no sfnt wrapper at all - no cmap, head, or
-// hmtx tables - so it isn't something opentype.parse() can read standalone;
-// that stays refused rather than attempting a hand-built sfnt wrapper.
+// opentype.parse() only accepts a complete sfnt container (it sniffs the
+// first 4 bytes for 'true'/0x00010000/'OTTO'/'wOFF'), but a bare CFF program
+// (FontFile3 /Type1C, the overwhelmingly common case for Adobe-tool-exported
+// print PDFs - confirmed directly against a real customer file where every
+// embedded font used it) is just the raw CFF table bytes with no wrapper at
+// all. Wraps it in the minimum sfnt opentype.js will actually parse without
+// crashing, verified empirically against opentype.js's parseBuffer: it reads
+// 'name' and 'cmap' unconditionally regardless of outline format (crashes on
+// undefined otherwise) and sizes hmtx off maxp.numGlyphs (crashes if that
+// doesn't match font.glyphs' real length, which CFF parsing sets
+// independently from the real charstrings count) - so maxp/hhea/hmtx here
+// deliberately claim exactly 1 glyph, both empty and harmless since glyph
+// outlines, counts and metrics all come from the real CFF table regardless;
+// PDF's own /Widths array is used for advance width, not hmtx.
+function wrapBareCffAsOpenType(cffBytes) {
+  const pad4 = bytes => {
+    const rem = bytes.length % 4;
+    return rem ? new Uint8Array([...bytes, ...new Uint8Array(4 - rem)]) : bytes;
+  };
+  const head = new DataView(new ArrayBuffer(54));
+  head.setUint32(0, 0x00010000); head.setUint32(4, 0x00010000);
+  head.setUint32(12, 0x5F0F3CF5); head.setUint16(18, 1000);
+  head.setInt16(40, 1000); head.setInt16(42, 1000); head.setInt16(48, 2);
+
+  const hhea = new DataView(new ArrayBuffer(36));
+  hhea.setUint32(0, 0x00010000); hhea.setInt16(4, 1000); hhea.setInt16(6, -200);
+  hhea.setUint16(10, 1000); hhea.setInt16(16, 1000); hhea.setInt16(18, 1); hhea.setUint16(34, 1);
+
+  const maxp = new DataView(new ArrayBuffer(6));
+  maxp.setUint32(0, 0x00005000); maxp.setUint16(4, 1); // CFF-flavored maxp (0.5), numGlyphs=1 (see note above)
+
+  const hmtx = new DataView(new ArrayBuffer(4));
+  hmtx.setUint16(0, 500);
+
+  const name = new DataView(new ArrayBuffer(6));
+  name.setUint16(4, 6); // empty name table: version 0, count 0, stringOffset 6
+
+  const cmap = new DataView(new ArrayBuffer(4 + 8 + 6 + 256));
+  cmap.setUint16(2, 1); cmap.setUint16(4, 1); cmap.setUint32(8, 12); // 1 subtable: platform 1 (Mac), encoding 0
+  cmap.setUint16(12, 0); cmap.setUint16(14, 6 + 256); // format 0, length (remaining 256-byte glyphIdArray left zeroed)
+
+  const tables = [
+    ['CFF ', cffBytes], ['cmap', new Uint8Array(cmap.buffer)], ['head', new Uint8Array(head.buffer)],
+    ['hhea', new Uint8Array(hhea.buffer)], ['hmtx', new Uint8Array(hmtx.buffer)],
+    ['maxp', new Uint8Array(maxp.buffer)], ['name', new Uint8Array(name.buffer)]
+  ].map(([tag, bytes]) => [tag, pad4(bytes)]).sort(([a], [b]) => a < b ? -1 : 1);
+
+  const numTables = tables.length;
+  const entrySelector = Math.floor(Math.log2(numTables));
+  const searchRange = Math.pow(2, entrySelector) * 16;
+  const headerSize = 12 + numTables * 16;
+  let offset = headerSize;
+  const dirEntries = [];
+  let totalLength = headerSize;
+  for (const [, bytes] of tables) { dirEntries.push(offset); offset += bytes.length; totalLength += bytes.length; }
+
+  const out = new Uint8Array(totalLength);
+  const outView = new DataView(out.buffer);
+  out.set([0x4F, 0x54, 0x54, 0x4F], 0); // 'OTTO'
+  outView.setUint16(4, numTables); outView.setUint16(6, searchRange);
+  outView.setUint16(8, entrySelector); outView.setUint16(10, numTables * 16 - searchRange);
+  tables.forEach(([tag, bytes], i) => {
+    const entryOffset = 12 + i * 16;
+    for (let c = 0; c < 4; c++) out[entryOffset + c] = tag.charCodeAt(c);
+    outView.setUint32(entryOffset + 8, dirEntries[i]);
+    outView.setUint32(entryOffset + 12, bytes.length);
+    out.set(bytes, dirEntries[i]);
+  });
+  return out;
+}
+
+// Builds a name->glyph-index lookup directly from each glyph's own `.name`
+// (populated from the CFF charset during parsing, independent of any 'post'
+// table) and overrides Font.nameToGlyphIndex with it - the wrapper above
+// provides no 'post' table, so the real implementation
+// (`this.glyphNames.nameToGlyphIndex`) would otherwise always fail.
+function attachCffGlyphNameLookup(font) {
+  const nameToIndex = new Map();
+  for (let i = 0; i < font.glyphs.length; i++) {
+    const name = font.glyphs.get(i).name;
+    if (name && !nameToIndex.has(name)) nameToIndex.set(name, i);
+  }
+  font.nameToGlyphIndex = name => nameToIndex.get(name) || 0;
+}
+
+// Returns { bytes, isBareCff } for the embedded font program opentype.js can
+// read: FontFile2 (bare TrueType/glyf) or FontFile3 /OpenType directly; a
+// bare CFF program (FontFile3 /Type1C) via wrapBareCffAsOpenType. A
+// CID-keyed bare CFF (/CIDFontType0C) is not handled here - its CID-to-GID
+// mapping lives in the CFF charset itself, a different mechanism than the
+// by-name lookup this wrapper enables - and stays refused.
 function getEmbeddedFontBytes(descriptor, lookup) {
   if (!(descriptor instanceof PDFDict)) return null;
   const fontFile2 = lookup(descriptor.get(PDFName.of('FontFile2')));
-  if (fontFile2 instanceof PDFRawStream) return decodePDFRawStream(fontFile2).decode();
+  if (fontFile2 instanceof PDFRawStream) return { bytes: decodePDFRawStream(fontFile2).decode(), isBareCff: false };
   const fontFile3 = lookup(descriptor.get(PDFName.of('FontFile3')));
-  if (fontFile3 instanceof PDFRawStream && fontFile3.dict.get(PDFName.of('Subtype'))?.toString() === '/OpenType') {
-    return decodePDFRawStream(fontFile3).decode();
+  if (fontFile3 instanceof PDFRawStream) {
+    const subtype = fontFile3.dict.get(PDFName.of('Subtype'))?.toString();
+    if (subtype === '/OpenType') return { bytes: decodePDFRawStream(fontFile3).decode(), isBareCff: false };
+    if (subtype === '/Type1C') return { bytes: decodePDFRawStream(fontFile3).decode(), isBareCff: true };
   }
   return null;
+}
+
+function parseEmbeddedFont(descriptor, lookup) {
+  const embedded = getEmbeddedFontBytes(descriptor, lookup);
+  if (!embedded) return null;
+  const sfntBytes = embedded.isBareCff ? wrapBareCffAsOpenType(embedded.bytes) : embedded.bytes;
+  let font;
+  try { font = opentype.parse(sfntBytes.buffer.slice(sfntBytes.byteOffset, sfntBytes.byteOffset + sfntBytes.byteLength)); }
+  catch { return null; }
+  if (embedded.isBareCff) attachCffGlyphNameLookup(font);
+  return font;
 }
 
 // Parses a simple (non-CID) font resource's embedded program and its
@@ -172,12 +319,8 @@ function getEmbeddedFontBytes(descriptor, lookup) {
 // directly is embedded (non-embedded, or a bare CFF/Type1 program).
 function loadSimpleFont(fontDict, lookup) {
   const descriptor = lookup(fontDict.get(PDFName.of('FontDescriptor')));
-  const bytes = getEmbeddedFontBytes(descriptor, lookup);
-  if (!bytes) return null;
-
-  let font;
-  try { font = opentype.parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)); }
-  catch { return null; }
+  const font = parseEmbeddedFont(descriptor, lookup);
+  if (!font) return null;
 
   const differences = new Map();
   const encoding = lookup(fontDict.get(PDFName.of('Encoding')));
@@ -207,12 +350,8 @@ function loadCidFont(fontDict, lookup) {
   const descendant = descendants instanceof PDFArray && descendants.size() === 1 && lookup(descendants.get(0));
   if (!(descendant instanceof PDFDict) || descendant.get(PDFName.of('Subtype'))?.toString() !== '/CIDFontType2') return null;
   const descriptor = lookup(descendant.get(PDFName.of('FontDescriptor')));
-  const bytes = getEmbeddedFontBytes(descriptor, lookup);
-  if (!bytes) return null;
-
-  let font;
-  try { font = opentype.parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)); }
-  catch { return null; }
+  const font = parseEmbeddedFont(descriptor, lookup);
+  if (!font) return null;
 
   const cidToGidMap = lookup(descendant.get(PDFName.of('CIDToGIDMap')));
   let cidToGid = null; // null = Identity (CID === GID), the common case

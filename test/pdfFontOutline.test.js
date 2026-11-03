@@ -38,6 +38,32 @@ function streamText(doc, ref) {
   return new TextDecoder('latin1').decode(decodePDFRawStream(doc.context.lookup(ref)).decode());
 }
 
+// opentype.js's own Font writer emits a complete CFF-flavored ('OTTO') sfnt.
+// Pulling just its 'CFF ' table out gives a real, portable, license-free bare
+// CFF program to test the FontFile3 /Type1C path against - no binary fixture
+// checked in, no system-font dependency.
+function extractCffTable(sfntBytes) {
+  const view = new DataView(sfntBytes.buffer, sfntBytes.byteOffset, sfntBytes.byteLength);
+  const numTables = view.getUint16(4);
+  for (let i = 0; i < numTables; i++) {
+    const entryOffset = 12 + i * 16;
+    const tag = String.fromCharCode(...sfntBytes.slice(entryOffset, entryOffset + 4));
+    if (tag === 'CFF ') {
+      const offset = view.getUint32(entryOffset + 8);
+      const length = view.getUint32(entryOffset + 12);
+      return sfntBytes.slice(offset, offset + length);
+    }
+  }
+  throw new Error('no CFF table found');
+}
+
+function embedBareCffFont(doc, cffBytes, { baseFont = 'TestCFFFont', encoding = 'WinAnsiEncoding' } = {}) {
+  const fontFile = doc.context.register(doc.context.flateStream(cffBytes, { Subtype: 'Type1C' }));
+  const descriptor = doc.context.register(doc.context.obj({ Type: 'FontDescriptor', FontName: baseFont, Flags: 32, FontFile3: fontFile }));
+  const fontDict = { Type: 'Font', Subtype: 'Type1', BaseFont: baseFont, Encoding: encoding, FontDescriptor: descriptor };
+  return doc.context.register(doc.context.obj(fontDict));
+}
+
 test('outlineFontsInPdf converts a simple Tj call for a selected embedded TrueType font', async () => {
   const doc = await PDFDocument.create();
   const page = doc.addPage([200, 200]);
@@ -157,6 +183,65 @@ test('outlineFontsInPdf also accepts an sfnt program embedded as FontFile3 /Open
   assert.deepEqual([...converted], ['TestFont']);
   assert.equal(unconverted.size, 0);
   assert.ok(!streamText(doc, content).includes('Tj'));
+});
+
+// Confirmed directly against a real customer-submitted print PDF where every
+// embedded font used exactly this: FontFile3 /Type1C, WinAnsiEncoding, no
+// /Differences. opentype.parse() can't read a bare CFF program at all (no
+// sfnt wrapper), so this exercises wrapBareCffAsOpenType + the
+// glyph-name-first resolution path (the only one that works here, since the
+// synthetic wrapper's cmap is intentionally empty).
+test('outlineFontsInPdf converts a bare CFF program (FontFile3 /Type1C) with no /Differences', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const cffBytes = extractCffTable(buildTestFont());
+  const fontRef = embedBareCffFont(doc, cffBytes);
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: { F1: fontRef } }));
+  const content = doc.context.register(doc.context.flateStream('BT /F1 10 Tf 0 0 Td (AB) Tj ET'));
+  page.node.set(PDFName.of('Contents'), content);
+
+  const { converted, unconverted } = outlineFontsInPdf(doc, new Set(['TestCFFFont']));
+  assert.deepEqual([...converted], ['TestCFFFont']);
+  assert.equal(unconverted.size, 0);
+
+  const text = streamText(doc, content);
+  assert.ok(!text.includes('Tj'), `expected Tj to be gone: ${text}`);
+  // two rect glyphs (A: 600x700, B: 500x700 per buildTestFont) -> 2 moveto + 6 lineto
+  assert.equal((text.match(/ m\b/g) || []).length, 2);
+  assert.equal((text.match(/ l\b/g) || []).length, 6);
+});
+
+test('outlineFontsInPdf resolves a bare CFF glyph via an explicit /Differences name even without a real cmap', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const cffBytes = extractCffTable(buildTestFont());
+  // Map code 1 (an otherwise-meaningless WinAnsi control code) to glyph name 'B'.
+  const fontRef = embedBareCffFont(doc, cffBytes, { encoding: { Differences: [1, 'B'] } });
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: { F1: fontRef } }));
+  const content = doc.context.register(doc.context.flateStream('BT /F1 10 Tf 0 0 Td <01> Tj ET'));
+  page.node.set(PDFName.of('Contents'), content);
+
+  const { converted, unconverted } = outlineFontsInPdf(doc, new Set(['TestCFFFont']));
+  assert.deepEqual([...converted], ['TestCFFFont']);
+  assert.equal(unconverted.size, 0);
+  const text = streamText(doc, content);
+  assert.equal((text.match(/ m\b/g) || []).length, 1);
+});
+
+test('outlineFontsInPdf refuses a non-embedded font with no FontFile2/FontFile3 at all', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([200, 200]);
+  const descriptor = doc.context.register(doc.context.obj({ Type: 'FontDescriptor', FontName: 'NoProgram', Flags: 32 }));
+  const fontDict = doc.context.register(doc.context.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'NoProgram', Encoding: 'WinAnsiEncoding', FontDescriptor: descriptor }));
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ Font: { F1: fontDict } }));
+  const source = 'BT /F1 10 Tf 0 0 Td (A) Tj ET';
+  const content = doc.context.register(doc.context.flateStream(source));
+  page.node.set(PDFName.of('Contents'), content);
+
+  const { converted, unconverted } = outlineFontsInPdf(doc, new Set(['NoProgram']));
+  assert.equal(converted.size, 0);
+  assert.deepEqual([...unconverted], ['NoProgram']);
+  assert.equal(streamText(doc, content), source);
 });
 
 test('outlineFontsInPdf positions a second glyph using the first glyph\'s declared advance width', async () => {
