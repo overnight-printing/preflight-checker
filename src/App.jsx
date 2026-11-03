@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Image as ImageIcon, ClipboardCheck, UploadCloud, Monitor, Moon, Sun, X } from 'lucide-react';
+import { Image as ImageIcon, ClipboardCheck, UploadCloud, Monitor, Moon, Sun, X, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import UploadZone from './components/UploadZone';
 import EditorCanvas from './components/EditorCanvas';
 import ControlPanel from './components/ControlPanel';
@@ -199,7 +199,25 @@ export default function App() {
     try { savedTheme = localStorage.getItem('theme'); } catch { /* Storage can be unavailable in private browsing. */ }
     return ['light', 'system', 'dark'].includes(savedTheme) ? savedTheme : 'system';
   });
-  
+
+  // Sidebar collapse state, persisted per side so a laptop-width user can reclaim canvas space.
+  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('leftSidebarCollapsed') === 'true'; } catch { return false; }
+  });
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('rightSidebarCollapsed') === 'true'; } catch { return false; }
+  });
+  const toggleLeftSidebar = () => setLeftSidebarCollapsed(value => {
+    const next = !value;
+    try { localStorage.setItem('leftSidebarCollapsed', String(next)); } catch { /* The toggle still applies without storage. */ }
+    return next;
+  });
+  const toggleRightSidebar = () => setRightSidebarCollapsed(value => {
+    const next = !value;
+    try { localStorage.setItem('rightSidebarCollapsed', String(next)); } catch { /* The toggle still applies without storage. */ }
+    return next;
+  });
+
   // Global drag-and-drop state
   const [isGlobalDragActive, setIsGlobalDragActive] = useState(false);
   const dragCounter = useRef(0);
@@ -1400,44 +1418,55 @@ export default function App() {
           /* Editor State */
           <>
             {/* 1. Preflight Sidebar Panel (left) */}
-            <aside className="control-sidebar control-sidebar-left">
+            <aside className={`control-sidebar control-sidebar-left ${leftSidebarCollapsed ? 'collapsed' : ''}`}>
               <div className="sidebar-header">
-                <h2>Preflight</h2>
+                {!leftSidebarCollapsed && <h2>Preflight</h2>}
+                <button
+                  type="button"
+                  className="sidebar-collapse-toggle"
+                  onClick={toggleLeftSidebar}
+                  title={leftSidebarCollapsed ? 'Expand Preflight' : 'Collapse Preflight'}
+                  aria-label={leftSidebarCollapsed ? 'Expand Preflight sidebar' : 'Collapse Preflight sidebar'}
+                >
+                  {leftSidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+                </button>
               </div>
 
-              {/* Mini Upload Zone Cards in Sidebar for replacement */}
-              <div className="document-utility">
-                <span className="document-utility-label">Document</span>
-                <UploadZone
-                  label="Artwork File"
-                  accept=".pdf,.png,.jpg,.jpeg"
-                  onFileSelect={handleArtworkSelect}
-                  selectedFile={artworkFile}
-                  disabled={isExporting || isGeneratingProof}
-                  onClear={handleClearArtwork}
-                  icon={ImageIcon}
-                />
-              </div>
+              {!leftSidebarCollapsed && <>
+                {/* Mini Upload Zone Cards in Sidebar for replacement */}
+                <div className="document-utility">
+                  <span className="document-utility-label">Document</span>
+                  <UploadZone
+                    label="Artwork File"
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    onFileSelect={handleArtworkSelect}
+                    selectedFile={artworkFile}
+                    disabled={isExporting || isGeneratingProof}
+                    onClear={handleClearArtwork}
+                    icon={ImageIcon}
+                  />
+                </div>
 
-              <fieldset className="tool-controls" disabled={controlsBusy}>
-                <PreflightPanel
-                  currentPage={currentPage}
-                  results={displayedPreflightResults}
-                  isScanning={isScanning}
-                  bleedAmount={effectiveBleedAmount}
-                  compatibilityDpi={compatibilityDpi}
-                  onCompatibilityDpiChange={setCompatibilityDpi}
-                  onRunFullCheck={handleRunFullPreflight}
-                  onCheckProduction={handleCheckProduction}
-                  canCheckProduction={Boolean(canExport)}
-                  onDownloadReport={handleDownloadPreflightReport}
-                  requirements={printRequirements}
-                  onRequirementsChange={requirements => { setPrintRequirements(requirements); setPreflightResults(null); }}
-                  onFix={handlePreflightFix}
-                  onReset={handleResetArtwork}
-                  artworkType={artworkType}
-                />
-              </fieldset>
+                <fieldset className="tool-controls" disabled={controlsBusy}>
+                  <PreflightPanel
+                    currentPage={currentPage}
+                    results={displayedPreflightResults}
+                    isScanning={isScanning}
+                    bleedAmount={effectiveBleedAmount}
+                    compatibilityDpi={compatibilityDpi}
+                    onCompatibilityDpiChange={setCompatibilityDpi}
+                    onRunFullCheck={handleRunFullPreflight}
+                    onCheckProduction={handleCheckProduction}
+                    canCheckProduction={Boolean(canExport)}
+                    onDownloadReport={handleDownloadPreflightReport}
+                    requirements={printRequirements}
+                    onRequirementsChange={requirements => { setPrintRequirements(requirements); setPreflightResults(null); }}
+                    onFix={handlePreflightFix}
+                    onReset={handleResetArtwork}
+                    artworkType={artworkType}
+                  />
+                </fieldset>
+              </>}
             </aside>
 
             {/* 2. Canvas Area */}
@@ -1527,11 +1556,21 @@ export default function App() {
             </div>
 
             {/* 3. Stamper Sidebar Panel (right) */}
-            <aside className="control-sidebar">
+            <aside className={`control-sidebar ${rightSidebarCollapsed ? 'collapsed' : ''}`}>
               <div className="sidebar-header">
-                <h2>Stamper</h2>
+                <button
+                  type="button"
+                  className="sidebar-collapse-toggle"
+                  onClick={toggleRightSidebar}
+                  title={rightSidebarCollapsed ? 'Expand Stamper' : 'Collapse Stamper'}
+                  aria-label={rightSidebarCollapsed ? 'Expand Stamper sidebar' : 'Collapse Stamper sidebar'}
+                >
+                  {rightSidebarCollapsed ? <PanelRightOpen size={16} /> : <PanelRightClose size={16} />}
+                </button>
+                {!rightSidebarCollapsed && <h2>Stamper</h2>}
               </div>
 
+              {!rightSidebarCollapsed && <>
               <fieldset className="tool-controls" disabled={controlsBusy}>
               {artworkType === 'pdf' && (
                 <div className="pdf-output-settings print-requirements">
@@ -1680,6 +1719,7 @@ export default function App() {
                   )}
                 </button>
               </div>
+              </>}
 
             </aside>
           </>

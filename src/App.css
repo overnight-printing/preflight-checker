@@ -301,6 +301,10 @@
 .sidebar-header {
   padding: 20px 24px;
   border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .sidebar-header h2 {
@@ -313,6 +317,38 @@
   font-size: 13px;
   color: var(--text-secondary);
   margin-top: 4px;
+}
+
+.sidebar-collapse-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sidebar-collapse-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-card-hover);
+}
+
+.control-sidebar.collapsed {
+  width: 48px;
+  min-width: 48px;
+  overflow: visible;
+}
+
+.control-sidebar.collapsed .sidebar-header {
+  padding: 14px 10px;
+  justify-content: center;
+  border-bottom: 0;
 }
 
 .sidebar-content {
