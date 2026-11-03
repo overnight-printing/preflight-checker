@@ -260,13 +260,11 @@ export default function EditorCanvas({
 
   return (
     <div className="canvas-workspace" ref={containerRef} onClick={onWorkspaceClick}>
-      <div 
+      <div
         style={{
           width: '100%',
           height: '100%',
           display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
           overflow: 'auto',
           padding: `${topPadding}px 40px ${bottomPadding}px 40px`
         }}
@@ -275,6 +273,7 @@ export default function EditorCanvas({
           style={{
             width: `${paperWidth * zoom}px`,
             height: `${paperHeight * zoom}px`,
+            margin: 'auto',
             position: 'relative',
             display: 'flex',
             justifyContent: 'center',
