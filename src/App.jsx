@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Image as ImageIcon, Sparkles, ClipboardCheck, UploadCloud, Monitor, Moon, Sun, X } from 'lucide-react';
+import { Image as ImageIcon, ClipboardCheck, UploadCloud, Monitor, Moon, Sun, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import UploadZone from './components/UploadZone';
 import EditorCanvas from './components/EditorCanvas';
 import ControlPanel from './components/ControlPanel';
@@ -18,9 +18,12 @@ const fixOrderBoxes = async (...args) => (await import('./utils/preflightChecker
 const getPdfBytes = async (...args) => (await import('./utils/pdfSource')).getPdfBytes(...args);
 const normalizePdfTrim = async (...args) => (await import('./utils/normalizePdfTrim')).normalizePdfTrim(...args);
 const fixBlankPage = async (...args) => (await import('./utils/preflightChecker')).fixBlankPage(...args);
+const fixSpotColors = async (...args) => (await import('./utils/preflightChecker')).fixSpotColors(...args);
+const fixFontOutlines = async (...args) => (await import('./utils/preflightChecker')).fixFontOutlines(...args);
 const createCustomerProofPdf = async (...args) => (await import('./utils/customerProof')).createCustomerProofPdf(...args);
 const createPngProofSourcePdf = async (...args) => (await import('./utils/customerProof')).createPngProofSourcePdf(...args);
 const createCompatibilityArtworkPdf = async (...args) => (await import('./utils/compatibilityPdf')).createCompatibilityArtworkPdf(...args);
+const getCompatibilityDpiFit = async (...args) => (await import('./utils/compatibilityPdf')).getCompatibilityDpiFit(...args);
 
 import {
   analyzeBackgroundLuminance,
@@ -184,13 +187,14 @@ export default function App() {
   const [proofId, setProofId] = useState('');
 
   // Preflight states
-  const [activeSidebarTab, setActiveSidebarTab] = useState('preflight'); // 'preflight' is default active tab
   const [preflightResults, setPreflightResults] = useState(null);
+  const [excludedRepairNames, setExcludedRepairNames] = useState({});
   const [printRequirements, setPrintRequirements] = useState(DEFAULT_PRINT_REQUIREMENTS);
   const [pdfOutputMode, setPdfOutputMode] = useState('preserve');
   const [compatibilityDpi, setCompatibilityDpi] = useState(600);
   const [artworkRepair, setArtworkRepair] = useState(null);
   const outputArtworkDpi = pdfOutputMode === 'compatibility' ? compatibilityDpi : artworkRepair?.dpi;
+  const [compatibilityDpiFit, setCompatibilityDpiFit] = useState(null); // { feasibleDpi, attempts, pagesFittingAt300 } | 'checking' | null
   
   // Theme state
   const [theme, setTheme] = useState(() => {
@@ -198,7 +202,25 @@ export default function App() {
     try { savedTheme = localStorage.getItem('theme'); } catch { /* Storage can be unavailable in private browsing. */ }
     return ['light', 'system', 'dark'].includes(savedTheme) ? savedTheme : 'system';
   });
-  
+
+  // Sidebar collapse state, persisted per side so a laptop-width user can reclaim canvas space.
+  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('leftSidebarCollapsed') === 'true'; } catch { return false; }
+  });
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('rightSidebarCollapsed') === 'true'; } catch { return false; }
+  });
+  const toggleLeftSidebar = () => setLeftSidebarCollapsed(value => {
+    const next = !value;
+    try { localStorage.setItem('leftSidebarCollapsed', String(next)); } catch { /* The toggle still applies without storage. */ }
+    return next;
+  });
+  const toggleRightSidebar = () => setRightSidebarCollapsed(value => {
+    const next = !value;
+    try { localStorage.setItem('rightSidebarCollapsed', String(next)); } catch { /* The toggle still applies without storage. */ }
+    return next;
+  });
+
   // Global drag-and-drop state
   const [isGlobalDragActive, setIsGlobalDragActive] = useState(false);
   const dragCounter = useRef(0);
@@ -408,6 +430,7 @@ export default function App() {
     resetUnionBugSettings();
     setArtworkFile(file);
     setOriginalFile(file); // Store initial upload as backup
+    setExcludedRepairNames({});
     setArtworkCanvas(null);
     setPdfDoc(null);
     setOriginalImage(null);
@@ -832,6 +855,21 @@ export default function App() {
     }
   }, [artworkFile, pdfDoc, artworkType]);
 
+  // Tell the operator what fits before they attempt a compatibility export,
+  // instead of letting the memory-cap error surface only after they click.
+  useEffect(() => {
+    if (pdfOutputMode !== 'compatibility' || artworkType !== 'pdf' || !artworkFile || !pdfDoc) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCompatibilityDpiFit(null);
+      return;
+    }
+    let active = true;
+    setCompatibilityDpiFit('checking');
+    getCompatibilityDpiFit(artworkFile, pdfDoc).then(fit => { if (active) setCompatibilityDpiFit(fit); },
+      () => { if (active) setCompatibilityDpiFit(null); });
+    return () => { active = false; };
+  }, [pdfOutputMode, artworkFile, pdfDoc, artworkType]);
+
   const handleRunFullPreflight = useCallback(async () => {
     if (!artworkFile || artworkType !== 'pdf' || !pdfDoc) return;
 
@@ -848,9 +886,12 @@ export default function App() {
   }, [artworkFile, pdfDoc, artworkType, printRequirements, artworkRepair]);
 
   // Handler for Preflight Auto-Fixes
-  const handlePreflightFix = async (checkKey) => {
+  const handlePreflightFix = async (checkKey, selectedNames) => {
     if (!artworkFile || isBusy || isScanning) return;
     const pagesToRemove = checkKey === 'blankPages' ? preflightResults?.checks?.blankPages?.value || [] : [];
+    const names = Array.isArray(selectedNames) ? (preflightResults?.checks?.[checkKey]?.value || []).filter(name => selectedNames.includes(name)) : [];
+    const spotNames = checkKey === 'spotColors' ? names.filter(name => !['All', 'None'].includes(name)) : [];
+    const fontNames = checkKey === 'fontEmbedding' ? names : [];
     if (checkKey === 'blankPages') {
       if (!pagesToRemove.length) return;
       if (pagesToRemove.length >= totalPages) { setNotice({ type: 'error', message: 'At least one page must remain. Remove pages individually in a PDF editor.' }); return; }
@@ -861,6 +902,8 @@ export default function App() {
     try {
       let updatedBytes = null;
       let repair = artworkRepair;
+      let spotConversionReport = null;
+      let fontOutlineReport = null;
 
       if (checkKey === 'bleed') {
         // Add the job's requested bleed without moving a custom stamp on trim.
@@ -885,6 +928,16 @@ export default function App() {
         if (repair) repair = { ...repair, pageDpi: Object.fromEntries(Object.entries(repair.pageDpi)
           .filter(([page]) => !pagesToRemove.includes(Number(page)))
           .map(([page, dpi]) => [Number(page) - pagesToRemove.filter(number => number < Number(page)).length, dpi])) };
+      } else if (checkKey === 'spotColors') {
+        if (!spotNames.length) return;
+        const result = await fixSpotColors(artworkFile, spotNames);
+        updatedBytes = result.bytes;
+        spotConversionReport = result;
+      } else if (checkKey === 'fontEmbedding') {
+        if (!fontNames.length) return;
+        const result = await fixFontOutlines(artworkFile, fontNames);
+        updatedBytes = result.bytes;
+        fontOutlineReport = result;
       }
 
       if (updatedBytes) {
@@ -914,8 +967,12 @@ export default function App() {
         setArtworkFile(correctedFile);
         setPdfDoc(doc);
         setTotalPages(doc.numPages);
-        setNotice({ type: 'success', message: checkKey === 'flattenArtwork'
+        setNotice({ type: spotConversionReport?.unconverted.length || fontOutlineReport?.unconverted.length ? 'warning' : 'success', message: checkKey === 'flattenArtwork'
           ? `Flattening repair applied at ${compatibilityDpi} DPI in RGB. Repaired page: ${currentPage}. Review the updated preview, then Save Production File. Reset Artwork restores the original.`
+          : checkKey === 'spotColors'
+          ? `${spotConversionReport.converted.length ? `Converted to CMYK: ${spotConversionReport.converted.join(', ')}.` : 'No spots were converted.'}${spotConversionReport.unconverted.length ? ` Left unchanged (requires a DeviceCMYK alternate and supported tint-transform, with all shared DeviceN inks selected): ${spotConversionReport.unconverted.join(', ')}. Use a color-managed PDF editor for other alternate spaces.` : ''} Review the updated checks, then Save Production File. Reset Artwork restores the original.`
+          : checkKey === 'fontEmbedding'
+          ? `${fontOutlineReport.converted.length ? `Outlined to vector paths: ${fontOutlineReport.converted.join(', ')}.` : 'No fonts were outlined.'}${fontOutlineReport.unconverted.length ? ` Left unchanged (unsupported font/encoding/render mode, unresolved characters, or mixed font selections within a text object): ${fontOutlineReport.unconverted.join(', ')}.` : ''} Review the updated checks, then Save Production File. Reset Artwork restores the original.`
           : 'Repair applied. Review the updated checks, then Save Production File. Reset Artwork restores the original.' });
 
         // Re-run preflight scan to update the UI status
@@ -1383,7 +1440,61 @@ export default function App() {
         ) : (
           /* Editor State */
           <>
-            {/* 1. Canvas Area */}
+            {/* 1. Preflight Sidebar Panel (left) */}
+            <aside className={`control-sidebar control-sidebar-left ${leftSidebarCollapsed ? 'collapsed' : ''}`}>
+              <button
+                type="button"
+                className="sidebar-edge-toggle sidebar-edge-toggle-left"
+                onClick={toggleLeftSidebar}
+                title={leftSidebarCollapsed ? 'Expand Preflight' : 'Collapse Preflight'}
+                aria-label={leftSidebarCollapsed ? 'Expand Preflight sidebar' : 'Collapse Preflight sidebar'}
+              >
+                {leftSidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+              </button>
+              <div className="sidebar-header">
+                {!leftSidebarCollapsed && <h2>Preflight</h2>}
+              </div>
+
+              {!leftSidebarCollapsed && <>
+                {/* Mini Upload Zone Cards in Sidebar for replacement */}
+                <div className="document-utility">
+                  <span className="document-utility-label">Document</span>
+                  <UploadZone
+                    label="Artwork File"
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    onFileSelect={handleArtworkSelect}
+                    selectedFile={artworkFile}
+                    disabled={isExporting || isGeneratingProof}
+                    onClear={handleClearArtwork}
+                    icon={ImageIcon}
+                  />
+                </div>
+
+                <fieldset className="tool-controls" disabled={controlsBusy}>
+                  <PreflightPanel
+                    excludedNames={excludedRepairNames}
+                    onExcludedNamesChange={setExcludedRepairNames}
+                    currentPage={currentPage}
+                    results={displayedPreflightResults}
+                    isScanning={isScanning}
+                    bleedAmount={effectiveBleedAmount}
+                    compatibilityDpi={compatibilityDpi}
+                    onCompatibilityDpiChange={setCompatibilityDpi}
+                    onRunFullCheck={handleRunFullPreflight}
+                    onCheckProduction={handleCheckProduction}
+                    canCheckProduction={Boolean(canExport)}
+                    onDownloadReport={handleDownloadPreflightReport}
+                    requirements={printRequirements}
+                    onRequirementsChange={requirements => { setPrintRequirements(requirements); setPreflightResults(null); }}
+                    onFix={handlePreflightFix}
+                    onReset={handleResetArtwork}
+                    artworkType={artworkType}
+                  />
+                </fieldset>
+              </>}
+            </aside>
+
+            {/* 2. Canvas Area */}
             <div className="editor-pane" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
               {/* Compact PDF Geometry Summary */}
               {geometryDetails && (
@@ -1469,47 +1580,22 @@ export default function App() {
               />
             </div>
 
-            {/* 2. Control Sidebar Panel */}
-            <aside className="control-sidebar">
+            {/* 3. Stamper Sidebar Panel (right) */}
+            <aside className={`control-sidebar ${rightSidebarCollapsed ? 'collapsed' : ''}`}>
+              <button
+                type="button"
+                className="sidebar-edge-toggle sidebar-edge-toggle-right"
+                onClick={toggleRightSidebar}
+                title={rightSidebarCollapsed ? 'Expand Stamper' : 'Collapse Stamper'}
+                aria-label={rightSidebarCollapsed ? 'Expand Stamper sidebar' : 'Collapse Stamper sidebar'}
+              >
+                {rightSidebarCollapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+              </button>
               <div className="sidebar-header">
-                <h2>Edit & Adjust</h2>
-                
+                {!rightSidebarCollapsed && <h2>Stamper</h2>}
               </div>
 
-              {/* Tab Switcher */}
-              <div className="sidebar-tabs" role="group" aria-label="Editor tools">
-                <button 
-                  className={`tab-btn ${activeSidebarTab === 'preflight' ? 'active' : ''}`}
-                  aria-pressed={activeSidebarTab === 'preflight'}
-                  onClick={() => setActiveSidebarTab('preflight')}
-                >
-                  <ClipboardCheck size={14} />
-                  <span>Preflight</span>
-                </button>
-                <button 
-                  className={`tab-btn ${activeSidebarTab === 'stamper' ? 'active' : ''}`}
-                  aria-pressed={activeSidebarTab === 'stamper'}
-                  onClick={() => setActiveSidebarTab('stamper')}
-                >
-                  <Sparkles size={14} />
-                  <span>Stamper Settings</span>
-                </button>
-              </div>
-
-              {/* Mini Upload Zone Cards in Sidebar for replacement */}
-              <div className="document-utility">
-                <span className="document-utility-label">Document</span>
-                <UploadZone
-                  label="Artwork File"
-                  accept=".pdf,.png,.jpg,.jpeg"
-                  onFileSelect={handleArtworkSelect}
-                  selectedFile={artworkFile}
-                  disabled={isExporting || isGeneratingProof}
-                  onClear={handleClearArtwork}
-                  icon={ImageIcon}
-                />
-              </div>
-
+              {!rightSidebarCollapsed && <>
               <fieldset className="tool-controls" disabled={controlsBusy}>
               {artworkType === 'pdf' && (
                 <div className="pdf-output-settings print-requirements">
@@ -1530,12 +1616,17 @@ export default function App() {
                     </label>
                     <p className="field-help">For objects or gradients that disappear when printed. Bakes the visible artwork into an opaque RGB image on white; the Union Bug stays vector.</p>
                     <p className="field-help">Source text/vectors, CMYK and spot plates become RGB pixels. Source output profiles are removed. Annotations/forms are excluded; overprint is not simulated. Confirm the preview and printer color settings, then test one page. Use a desktop transparency flattener when press colors or vector text must be retained.</p>
+                    {compatibilityDpiFit === 'checking' && <p className="field-help">Checking whether this document fits in browser memory…</p>}
+                    {compatibilityDpiFit && compatibilityDpiFit !== 'checking' && !compatibilityDpiFit.attempts[compatibilityDpi]?.fits && (
+                      compatibilityDpiFit.feasibleDpi
+                        ? <p className="field-help" role="status">This document is too large to flatten at {compatibilityDpi} DPI in the browser. {compatibilityDpiFit.feasibleDpi} DPI fits — select it above.</p>
+                        : <p className="field-help" role="status">This document does not fit in browser memory at 300 or 600 DPI. {compatibilityDpiFit.pagesFittingAt300.length} of {totalPages} pages fit individually at 300 DPI; flatten affected pages one at a time with "Apply flattening repair", or use a desktop transparency flattener for the full document.</p>
+                    )}
                   </>}
                   {artworkRepair && <p className="field-help">RGB repair applied: {Object.entries(artworkRepair.pageDpi).map(([page, dpi]) => `page ${page} at ${dpi} DPI`).join(', ')}. Source vectors, text and ink plates on these pages became pixels. Reset Artwork restores the original PDF.</p>}
                 </div>
               )}
-              {activeSidebarTab === 'stamper' ? (
-                <ControlPanel
+              <ControlPanel
                   colorMode={colorMode}
                   selectedColor={selectedColor}
                   extractedColors={extractedColors}
@@ -1585,25 +1676,6 @@ export default function App() {
                   onClearBug={handleClearBug}
                   isExporting={isExporting}
                 />
-              ) : (
-                <PreflightPanel
-                  currentPage={currentPage}
-                  results={displayedPreflightResults}
-                  isScanning={isScanning}
-                  bleedAmount={effectiveBleedAmount}
-                  compatibilityDpi={compatibilityDpi}
-                  onCompatibilityDpiChange={setCompatibilityDpi}
-                  onRunFullCheck={handleRunFullPreflight}
-                  onCheckProduction={handleCheckProduction}
-                  canCheckProduction={Boolean(canExport)}
-                  onDownloadReport={handleDownloadPreflightReport}
-                  requirements={printRequirements}
-                  onRequirementsChange={requirements => { setPrintRequirements(requirements); setPreflightResults(null); }}
-                  onFix={handlePreflightFix}
-                  onReset={handleResetArtwork}
-                  artworkType={artworkType}
-                />
-              )}
 
               </fieldset>
               {/* Universal Persistent Export Button at bottom of sidebar */}
@@ -1648,11 +1720,11 @@ export default function App() {
                 </div>
                 <div className="export-heading">
                   <strong>Production file</strong>
-                  <span>{outputArtworkDpi && artworkType === 'pdf' ? `Compatibility PDF · ${outputArtworkDpi} DPI RGB artwork.` : 'Save the current output as a production file.'}</span>
+                  <span>{outputArtworkDpi && artworkType === 'pdf' ? `Compatibility PDF · ${outputArtworkDpi} DPI RGB artwork.` : 'Optimized for printing. Keep the original file for editing.'}</span>
                 </div>
                 <button
                   className={`btn btn-action-block ${
-                    activeSidebarTab === 'stamper' || artworkType !== 'pdf' || preflightResults
+                    artworkType !== 'pdf' || preflightResults
                       ? 'btn-primary'
                       : 'btn-secondary'
                   }`}
@@ -1672,6 +1744,7 @@ export default function App() {
                   )}
                 </button>
               </div>
+              </>}
 
             </aside>
           </>

@@ -7,6 +7,7 @@ import subprocess
 
 output = Path(os.environ.get('PREFLIGHT_AUDIT_OUTPUT', 'output/audit')).resolve()
 expected = {
+    'ui-selective-repairs': ((252, 144), (0, 0, 252, 144), 0),
     'order-boxes': ((270, 162), (9, 9, 261, 153), 0),
     'ui-order-boxes': ((270, 162), (9, 9, 261, 153), 0),
     'removed-blanks': ((252, 144), (0, 0, 252, 144), 0),

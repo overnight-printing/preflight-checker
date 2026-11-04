@@ -4,6 +4,8 @@ import { rotatedSize } from './pdfGeometry.js';
 import { getPdfBytes, getPdfDocument } from './pdfSource.js';
 import { scanContent, multiplyLinearMatrices } from './pdfContent.js';
 import { normalizePrintRequirements, getPrintDocumentChecks, getOrderTrim } from './printRequirements.js';
+import { convertSpotColorsToCmyk } from './pdfSpotConversion.js';
+import { removeOrphanedObjects } from './pdfGarbageCollect.js';
 
 /**
  * Runs print checks against the selected job requirements.
@@ -69,6 +71,7 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
   let hasOverprint = false;
   let unmeasuredImages = false;
   const nonEmbeddedFonts = new Set();
+  const embeddedFontsFound = new Set();
   let hasRGBContent = false;
   const rgbPages = new Set(), whiteOverprintPages = new Set(), orderBoxPages = [], orderMismatchPages = [];
   let incompleteContent = false;
@@ -142,7 +145,11 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
             const subtype = fontObj.get(PDFName.of('Subtype'));
             const fontName = fontObj.get(PDFName.of('BaseFont'))?.toString() || 'Unnamed Font';
             
-            if (subtype !== PDFName.of('Type3')) {
+            if (subtype === PDFName.of('Type3')) {
+              // A Type3 font's CharProcs are its glyph data - there's no separate
+              // font program to be "missing", so it's always reportable as embedded.
+              embeddedFontsFound.add(fontName.replace('/', '').replace(/^[A-Z]{6}\+/, ''));
+            } else {
               const descendants = lookup(fontObj.get(PDFName.of('DescendantFonts')));
               const fontPrograms = descendants instanceof PDFArray
                 ? descendants.asArray().map(lookup) : [fontObj];
@@ -156,6 +163,11 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
 
               if (!isEmbedded) {
                 nonEmbeddedFonts.add(fontName.replace('/', ''));
+              } else {
+                // Strip the random 6-letter subset tag (e.g. "ABCDEF+Helvetica") the
+                // same way pdfFontOutline.js's outlineFontsInPdf does, so a name here
+                // matches what that module reports as converted/unconverted.
+                embeddedFontsFound.add(fontName.replace('/', '').replace(/^[A-Z]{6}\+/, ''));
               }
             }
           }
@@ -353,12 +365,18 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
   }
 
   // Update Font Embedding Status
-  if (nonEmbeddedFonts.size > 0) {
+  if (nonEmbeddedFonts.size > 0 || embeddedFontsFound.size > 0) {
+    const missingDetails = nonEmbeddedFonts.size
+      ? `Missing font programs: ${Array.from(nonEmbeddedFonts).join(', ')}. Embed fonts or outline text in the source application. Rasterizing with substituted fonts does not repair missing fonts.`
+      : '';
+    const embeddedDetails = embeddedFontsFound.size
+      ? `Embedded: ${Array.from(embeddedFontsFound).join(', ')}. "Create Outlines" converts their text to vector paths using each font's own embedded program; any text it can't resolve that way is left untouched and reported.`
+      : '';
     results.checks.fontEmbedding = {
-      status: 'error',
-      details: `Missing font programs: ${Array.from(nonEmbeddedFonts).join(', ')}. Embed fonts or outline text in the source application. Rasterizing with substituted fonts does not repair missing fonts.`,
-      value: Array.from(nonEmbeddedFonts),
-      fixable: false
+      status: nonEmbeddedFonts.size ? 'error' : 'info',
+      details: [missingDetails, embeddedDetails].filter(Boolean).join(' '),
+      value: Array.from(embeddedFontsFound),
+      fixable: embeddedFontsFound.size > 0
     };
   }
 
@@ -428,11 +446,12 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
 
   // Update Spot Colors Status
   if (spotColorsFound.size > 0) {
+    const convertibleSpots = Array.from(spotColorsFound).filter(name => !['All', 'None'].includes(name));
     results.checks.spotColors = {
       status: registrationPages.size ? 'error' : spotColorsFound.has('All') ? 'warning' : 'info',
-      details: `Spot inks: ${Array.from(spotColorsFound).join(', ')}. Confirm these plates are intended; convert unwanted spots using the printer's color-managed workflow.${spotColorsFound.has('All') ? ` Registration color (/All) prints on every plate.${registrationPages.size ? ` Painted registration artwork on pages ${[...registrationPages].join(', ')} is not identified as printer marks; correct artwork or verify marks in a production PDF editor.` : ' Confirm registration is limited to printer marks.'}` : ''}${spotColorsFound.has('None') ? ' /None prints nothing; confirm invisible artwork is intentional.' : ''}`,
+      details: `Spot inks: ${Array.from(spotColorsFound).join(', ')}. Confirm these plates are intended; convert unwanted spots using the printer's color-managed workflow.${spotColorsFound.has('All') ? ` Registration color (/All) prints on every plate.${registrationPages.size ? ` Painted registration artwork on pages ${[...registrationPages].join(', ')} is not identified as printer marks; correct artwork or verify marks in a production PDF editor.` : ' Confirm registration is limited to printer marks.'}` : ''}${spotColorsFound.has('None') ? ' /None prints nothing; confirm invisible artwork is intentional.' : ''}${convertibleSpots.length ? ' "Convert to CMYK" uses selected spots\' declared DeviceCMYK tint transforms. Lab, RGB, Gray, and ICC-based alternates need a color-managed workflow and are left unchanged; shared DeviceN inks must all be selected.' : ''}`,
       value: Array.from(spotColorsFound),
-      fixable: false
+      fixable: convertibleSpots.length > 0
     };
   }
 
@@ -534,4 +553,32 @@ export async function fixOrderBoxes(file, requirements) {
     for (const [name, box] of [['Crop', boxes.bleed], ['Bleed', boxes.bleed], ['Trim', boxes.trim]]) page[`set${name}Box`](box.x, box.y, box.width, box.height);
   }
   return pdfDoc.save();
+}
+
+// Converts every spot in `spotNames` (expected: the convertible subset of a
+// spotColors check's own value, i.e. excluding registration /All and /None)
+// to its declared DeviceCMYK tint-transform equivalent. Reports which
+// spots actually converted versus which were left untouched (an unsupported
+// alternate space, or a malformed tint-transform) so the caller can tell the
+// operator honestly rather than imply every spot was handled.
+export async function fixSpotColors(file, spotNames) {
+  const pdfDoc = await getPdfDocument(file, true);
+  const { converted, unconverted } = convertSpotColorsToCmyk(pdfDoc, new Set(spotNames.map(name => `/${name}`)));
+  await removeOrphanedObjects(pdfDoc);
+  return { bytes: await pdfDoc.save(), converted: [...converted], unconverted: [...unconverted] };
+}
+
+// Outlines every font in `fontNames` (expected: a fontEmbedding check's own
+// value, i.e. the embedded-font subset) into vector paths using each font's
+// own embedded program. Reports which fonts converted everywhere their text
+// appeared versus which were left untouched because their program, encoding,
+// render mode, glyphs, or text-object selection could not be safely converted.
+export async function fixFontOutlines(file, fontNames) {
+  // opentype.js is a meaningful chunk of code; load it only when an operator
+  // actually clicks "Create Outlines", not on every preflight scan.
+  const { outlineFontsInPdf } = await import('./pdfFontOutline.js');
+  const pdfDoc = await getPdfDocument(file, true);
+  const { converted, unconverted } = outlineFontsInPdf(pdfDoc, new Set(fontNames));
+  await removeOrphanedObjects(pdfDoc);
+  return { bytes: await pdfDoc.save(), converted: [...converted], unconverted: [...unconverted] };
 }

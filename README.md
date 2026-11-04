@@ -130,7 +130,7 @@ For images:
 
 ### 2. Review the preflight report
 
-Open the **Preflight** tab and review each result. A status can be:
+Review results in the left **Preflight** sidebar; stamp and export controls are in the right **Stamper** sidebar. Both sidebars can be collapsed independently. A status can be:
 
 - **Pass** — no issue was detected by the current check.
 - **Warning** — review is recommended, but export is still available.
@@ -143,7 +143,11 @@ Use **Reset Artwork** at any time to return to the originally uploaded file.
 
 Select an available repair for the issue you want to address. **Set Boxes to Order**, confirmed **Review and Remove Blank Pages**, and the displayed-page **Apply flattening repair (RGB)** create an updated in-memory PDF and rerun the scan. Overprint issues require source-file review; intentional overprint is retained. **Add Mirror Bleed** schedules the job's required bleed for export; use **Check production output** to verify it. **Save Production File** downloads the repaired PDF. Your original upload remains available through **Reset Artwork**.
 
-Bleed, overprint and blank-page repairs preserve PDF resources. When findings include transparency, gradients, masks or optional layers, **Repair disappearing artwork** offers an explicit 300/600 DPI RGB repair. It bakes the saved visible artwork, updates the preview and removes those live effects from the working PDF. It also converts source vectors/text and press ink plates to pixels, so review its tradeoffs before applying. Missing fonts, low-resolution originals and unwanted spot inks need correction in the source application. The separate **PDF output → Flatten visible artwork (RGB)** option applies the same appearance fallback only when preparing output.
+**Convert to CMYK** and **Create Outlines** include a checkbox for each available ink or embedded font. Uncheck plates such as foil or varnish, or fonts that must remain text. Only checked names are sent to the repair; the button shows the selected count and is disabled when nothing is selected. Choices survive scans, repairs, and sidebar collapse, and reset on a new upload or **Reset Artwork**.
+
+Spot conversion evaluates the PDF's own DeviceCMYK tint transform. Lab, RGB, Gray, and ICC-based alternates remain unchanged and require a color-managed workflow; an ICC profile's channel count does not identify its color space. A shared DeviceN space is retained unless every component is selected. Outlining supports embedded TrueType/OpenType, simple bare CFF fonts, horizontal Identity-H CID fonts, and resource-free Type3 glyphs. Unsupported text objects, including mixed selected/unselected fonts within one BT/ET object, remain intact and are reported.
+
+Bleed, overprint and blank-page repairs preserve PDF resources. When findings include transparency, gradients, masks or optional layers, **Repair disappearing artwork** offers an explicit 300/600 DPI RGB repair. It bakes the saved visible artwork, updates the preview and removes those live effects from the working PDF. It also converts source vectors/text and press ink plates to pixels, so review its tradeoffs before applying. Missing fonts, low-resolution originals and unsupported spot conversions need correction in the source application. The separate **PDF output → Flatten visible artwork (RGB)** option applies the same appearance fallback only when preparing output.
 
 ### 4. Configure the Union Bug
 
@@ -181,6 +185,8 @@ To prepare a review file, enter the estimate or invoice number and click **Creat
 
 With **Preserve vectors and source colors**, the proof does not rasterize or downsample PDF artwork. File-size savings therefore depend on how efficiently the source PDF was already encoded; image-heavy proofs may remain close to the original file size. Selecting compatibility output also flattens the artwork used in the customer proof.
 
+Production exports omit private application editing data (such as Illustrator's embedded reconstruction data) and drop unused PDF objects, without recompressing images or changing print resources. Keep the original source for editing; the production PDF is optimized for printing. Already optimized inputs may see little size reduction.
+
 Customer proofs use a filename such as `campaign-flyer_Customer_Proof_EST-1042.pdf`.
 
 Click **Save Production File** for production artwork.
@@ -197,13 +203,13 @@ Click **Save Production File** for production artwork.
 | Image Resolution | Estimates effective resolution of embedded raster images | Errors below 150 DPI; warns below the selected job DPI target (default 300) |
 | Bleed Margin | Compares TrimBox and BleedBox geometry | Compares each edge against the selected job target (default 9 pt); no-bleed jobs are supported |
 | Overprint | Tracks painted fill/stroke overprint through graphics states and nested Forms | Intentional overprint is informational; painted white overprint is an error requiring source repair |
-| Font Embedding | Inspects referenced font descriptors for embedded font programs | Requires embedding or outlining in the source application |
+| Font Embedding | Inspects referenced font descriptors for embedded font programs | Offers selected embedded-font outlining; missing font programs require source repair |
 | Color Mode | Scans color operators, nested Forms, images, shadings and three-channel ICC resources | Reports RGB page numbers; warns, or errors for legacy PDF/X-1a |
 | Page Size Match | Compares finished dimensions with an explicit order size, or with page 1 when unspecified | Errors on order mismatches (0.5 pt tolerance); warns on inconsistent pages (3 pt) |
 | Transparency | Checks used opacity, blend modes and soft masks; an empty transparency group alone does not trigger a finding | Informational for general/PDF/X-4 workflows; an error for legacy PDF/X-1a |
 | Gradients & Shadings | Finds PDF shading dictionaries, including nested artwork | Explains printer/RIP rendering risks without treating valid gradients as defects |
 | Image Masks | Finds stencil and explicit image masks | Identifies opaque masked artwork, including white logos; offers compatibility export guidance for printer failures |
-| Spot Colors | Looks for Separation and DeviceN color spaces | Lists intended ink plates; requires color-managed source conversion for unwanted spots |
+| Spot Colors | Looks for Separation and DeviceN color spaces | Offers selected DeviceCMYK tint-transform conversion; other alternates require a color-managed workflow |
 | Blank Pages | Checks PDF.js painting operators, including paths and outlined artwork | Confirms all flagged page numbers before removal; always retains at least one page |
 | Hidden Layers | Checks for optional-content configuration in the PDF catalog | Requests visibility review; removing the catalog alone is unsafe |
 | PDF Version | Reads the PDF header version | Checks the selected workflow; PDF/X-4 requires 1.6 or later |

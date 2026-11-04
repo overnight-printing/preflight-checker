@@ -23,6 +23,7 @@ import { createPDFPageEmbedder } from './pdfPageEmbedding';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { getPdfBytes, getPdfDocument } from './pdfSource.js';
 import { tintStampContent } from './pdfStampColor.js';
+import { removeOrphanedObjects } from './pdfGarbageCollect.js';
 import { getCropMarkLines } from './cropMarks.js';
 
 // Ship the matching worker with the app, including deployments under a base path.
@@ -391,12 +392,12 @@ export async function stitchBugToPDF(
   isCropMode = false,
   { cropMarksEnabled = false } = {}
 ) {
-  const originalBytes = await getPdfBytes(originalPDFFile);
   const pdfDoc = await getPdfDocument(originalPDFFile, true);
 
   const rebuild = requiresRebuiltPdfOutput({ bleedAmount, trimCropEnabled, manualCropAmount, isCropMode, cropMarksEnabled });
-  if (!bugEnabled && !rebuild) return new Uint8Array(originalBytes);
   const pages = pdfDoc.getPages();
+  const hasPrivateEditingData = pdfDoc.catalog.has(PDFName.of('PieceInfo')) || pages.some(page => page.node.has(PDFName.of('PieceInfo')));
+  if (!bugEnabled && !rebuild && !hasPrivateEditingData) return new Uint8Array(await getPdfBytes(originalPDFFile));
   const pagesToStitch = targetPages ?? [currentPageIndex];
   if (bugEnabled && !bugFile) throw new Error('Load a Union Bug PDF before exporting.');
   if (isCropMode) throw new Error('Visual cropping is unavailable. Use TrimBox cropping and manual inset.');
@@ -452,6 +453,10 @@ export async function stitchBugToPDF(
       }
     }
 
+    // Production output needs rendered artwork, not private source-application editing data.
+    for (const page of pages) page.node.delete(PDFName.of('PieceInfo'));
+    pdfDoc.catalog.delete(PDFName.of('PieceInfo'));
+    await removeOrphanedObjects(pdfDoc);
     return await pdfDoc.save({ useObjectStreams: true });
   }
 
@@ -510,5 +515,6 @@ export async function stitchBugToPDF(
     }
   }
 
+  await removeOrphanedObjects(outputDoc);
   return await outputDoc.save({ useObjectStreams: true });
 }

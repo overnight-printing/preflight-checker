@@ -1,3 +1,7 @@
+:root {
+  --sidebar-width: 332px;
+}
+
 .app-container {
   display: flex;
   flex-direction: column;
@@ -281,8 +285,9 @@
 
 /* Control Sidebar */
 .control-sidebar {
-  width: 360px;
-  min-width: 360px;
+  position: relative;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
   max-height: 100%;
   min-height: 0;
   background: var(--bg-surface);
@@ -297,6 +302,10 @@
 .sidebar-header {
   padding: 20px 24px;
   border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .sidebar-header h2 {
@@ -309,6 +318,45 @@
   font-size: 13px;
   color: var(--text-secondary);
   margin-top: 4px;
+}
+
+/* A small round button that floats half-on/half-off the sidebar's border,
+   vertically centered - same affordance as Canva's panel-collapse control. */
+.sidebar-edge-toggle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  z-index: 20;
+  box-shadow: var(--shadow-sm);
+}
+
+.sidebar-edge-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-card-hover);
+}
+
+.sidebar-edge-toggle-left { right: -13px; }
+.sidebar-edge-toggle-right { left: -13px; }
+
+.control-sidebar.collapsed {
+  width: 48px;
+  min-width: 48px;
+  overflow: visible;
+}
+
+.control-sidebar.collapsed .sidebar-header {
+  display: none;
 }
 
 .sidebar-content {
@@ -915,46 +963,6 @@ input:checked + .slider-switch:before {
   to { transform: rotate(360deg); }
 }
 
-/* Sidebar Tab Switcher */
-.sidebar-tabs {
-  display: flex;
-  width: 100%;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-input);
-}
-
-.tab-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 14px 16px;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.tab-btn:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.tab-btn.active {
-  color: var(--primary-hover);
-  border-bottom-color: var(--primary);
-  background: rgba(168, 85, 247, 0.04);
-}
-
-.tab-btn.active svg {
-  color: var(--primary);
-}
-
 /* Theme Switcher Button Group */
 .theme-switcher {
   display: flex;
@@ -1091,6 +1099,114 @@ input:checked + .slider-switch:before {
 
 :root[data-theme="light"] .zoom-btn:hover {
   background: rgba(0, 0, 0, 0.05) !important;
+}
+
+.zoom-slider {
+  width: 90px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+/* Firefox renders the track via this pseudo-element even with accent-color set;
+   without an explicit background it can come out fully transparent. */
+.zoom-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-color);
+}
+
+.zoom-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+}
+
+/* WebKit/Blink (Chrome, Safari, Edge) needs the track drawn explicitly too -
+   -webkit-appearance: none above removes the native track along with the fill. */
+.zoom-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-color);
+}
+
+.zoom-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+}
+
+.zoom-menu-anchor {
+  position: relative;
+}
+
+.zoom-percent-btn {
+  background: transparent;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 45px;
+  text-align: center;
+  cursor: pointer;
+  padding: 4px 2px;
+  border-radius: 6px;
+}
+
+.zoom-percent-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-theme="light"] .zoom-percent-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.zoom-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  min-width: 100px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  padding: 6px;
+  z-index: 30;
+}
+
+.zoom-menu button {
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text-primary);
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.zoom-menu button:hover {
+  background: var(--bg-card-hover);
+}
+
+.zoom-menu-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 2px;
 }
 
 /* Advanced Settings Collapsible */
@@ -1460,15 +1576,6 @@ input:checked + .slider-switch:before {
   font-weight: 600;
 }
 
-:root[data-theme="light"] .sidebar-tabs {
-  background: #ffffff;
-}
-
-:root[data-theme="light"] .tab-btn.active {
-  color: #176ca7;
-  background: #edf7ff;
-}
-
 :root[data-theme="light"] .segmented-control button.active,
 :root[data-theme="light"] .alignment-grid button.active {
   background: #edf7ff;
@@ -1503,11 +1610,16 @@ input:checked + .slider-switch:before {
 }
 
 .control-sidebar {
-  width: 332px;
-  min-width: 332px;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
   background: var(--bg-surface);
   backdrop-filter: none;
   box-shadow: none;
+}
+
+.control-sidebar-left {
+  border-left: 0;
+  border-right: 1px solid var(--border-color);
 }
 
 .sidebar-header {
@@ -1518,34 +1630,6 @@ input:checked + .slider-switch:before {
 .sidebar-header h2 {
   font-size: 15px;
   font-weight: 650;
-}
-
-.sidebar-tabs {
-  width: auto;
-  margin: 0 16px 12px;
-  padding: 3px;
-  border: 1px solid var(--border-color);
-  border-radius: 9px;
-  background: var(--bg-input);
-}
-
-.tab-btn {
-  min-height: 34px;
-  padding: 7px 10px;
-  border: 0;
-  border-radius: 6px;
-  font-size: 12px;
-}
-
-.tab-btn.active {
-  color: var(--text-primary);
-  border: 0;
-  background: var(--bg-card-hover);
-  box-shadow: var(--shadow-sm);
-}
-
-.tab-btn.active svg {
-  color: var(--primary-hover);
 }
 
 .document-utility {
@@ -2165,9 +2249,8 @@ summary:focus-visible {
 }
 
 @media (max-width: 900px) {
-  .control-sidebar {
-    width: 310px;
-    min-width: 310px;
+  :root {
+    --sidebar-width: 300px;
   }
 
   .geometry-summary-bar span:nth-of-type(2) {
@@ -2249,6 +2332,7 @@ summary:focus-visible {
 .app-notice span { flex: 1; overflow-wrap: anywhere; }
 .app-notice.error { color: var(--danger); }
 .app-notice.success { color: var(--success); }
+.app-notice.warning { color: var(--warning); }
 .app-notice button:not(.btn) { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 6px; color: inherit; background: transparent; cursor: pointer; }
 .app-notice .btn { flex-shrink: 0; }
 .upload-error { display: flex; align-items: center; gap: 6px; }
@@ -2269,7 +2353,8 @@ fieldset:disabled { opacity: 0.65; }
   .release-version { display: none; }
   .workspace { flex-direction: column; height: auto; overflow: visible; }
   .editor-pane { flex: none !important; width: 100%; height: 55dvh !important; min-height: 360px !important; }
-  .control-sidebar { width: 100%; min-width: 0; max-height: none; border-left: 0; border-top: 1px solid var(--border-color); }
+  .control-sidebar { width: 100%; min-width: 0; max-height: none; border-left: 0; border-right: 0; border-top: 1px solid var(--border-color); }
+  .sidebar-edge-toggle { top: 24px; right: 8px; left: auto; }
   .tool-controls { overflow: visible; }
   .export-area { position: static; }
   .canvas-workspace { padding: 8px; }

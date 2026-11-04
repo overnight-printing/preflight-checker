@@ -1,6 +1,7 @@
 import { PDFDocument, PDFName, StandardFonts, rgb, degrees } from 'pdf-lib';
 import { rotatedSize } from './pdfGeometry.js';
 import { createPDFPageEmbedder } from './pdfPageEmbedding.js';
+import { removeOrphanedObjects } from './pdfGarbageCollect.js';
 
 const LETTER_PORTRAIT = [612, 792];
 const LETTER_LANDSCAPE = [792, 612];
@@ -275,6 +276,7 @@ export async function createCustomerProofPdf({
   // Object streams reduce structural overhead without decoding, rasterizing, or
   // transcoding the embedded artwork. Its original color spaces and resources
   // therefore remain intact in the customer proof.
+  await removeOrphanedObjects(proofDocument);
   return proofDocument.save({ useObjectStreams: true });
 }
 

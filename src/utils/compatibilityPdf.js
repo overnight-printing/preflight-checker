@@ -1,7 +1,39 @@
 import { PDFDocument, PDFName } from 'pdf-lib';
 import { AnnotationMode } from 'pdfjs-dist';
-import { getCompatibilityRenderSize } from './compatibilityGeometry.js';
+import { getCompatibilityRenderSize, summarizeCompatibilityFit } from './compatibilityGeometry.js';
 import { getPdfDocument } from './pdfSource.js';
+import { removeOrphanedObjects } from './pdfGarbageCollect.js';
+
+// Cheap, pre-render feasibility check: tells the caller which DPI (600, 300, or
+// neither) actually fits before any canvas work starts, instead of letting the
+// operator discover the limit via a failed export. Never picks a DPI for the
+// caller — it only reports what fits, so a user-selected target is never
+// silently lowered.
+export async function getCompatibilityDpiFit(file, pdfjsDocument, pageNums = null) {
+  const source = await getPdfDocument(file);
+  const pages = source.getPages();
+  const selected = new Set(pageNums ?? pages.map((_, index) => index + 1));
+  if (!selected.size || [...selected].some(number => !Number.isInteger(number) || number < 1 || number > pages.length)) throw new Error('Choose valid pages to flatten.');
+  const pageNumbers = [];
+  const boxes = [];
+  for (const index of pages.keys()) {
+    if (!selected.has(index + 1)) continue;
+    const renderedPage = await pdfjsDocument.getPage(index + 1);
+    // Scale 1 viewport already reflects UserUnit and CropBox∩MediaBox, in points.
+    const viewport = renderedPage.getViewport({ scale: 1, rotation: 0 });
+    pageNumbers.push(index + 1);
+    boxes.push({ width: viewport.width, height: viewport.height });
+  }
+  const attempts = {};
+  let feasibleDpi = null;
+  for (const dpi of [600, 300]) {
+    const summary = summarizeCompatibilityFit(boxes, dpi);
+    attempts[dpi] = { ...summary, perPage: summary.perPage.map((page, i) => ({ ...page, page: pageNumbers[i] })) };
+    if (feasibleDpi === null && summary.fits) feasibleDpi = dpi;
+  }
+  const pagesFittingAt300 = attempts[300].perPage.filter(page => page.fits).map(page => page.page);
+  return { feasibleDpi, attempts, pagesFittingAt300 };
+}
 
 // Explicit appearance fallback for printer/RIP failures. Canvas rendering is
 // RGB and loses source text/vectors/spot plates; normal export never uses this.
@@ -79,5 +111,6 @@ export async function createCompatibilityArtworkPdf(file, pdfjsDocument, dpi = 6
   }
   output.setTitle(`${file.name} — compatibility artwork (${dpi} DPI RGB)`);
   output.setProducer('Overnight Preflight Tool: explicit appearance rasterization');
+  await removeOrphanedObjects(output);
   return output.save({ useObjectStreams: true });
 }

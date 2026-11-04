@@ -151,7 +151,7 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
     await browserPage.locator('input[type=file]').first().setInputFiles(out + '/compatibility-source.pdf');
     await browserPage.getByRole('button', { name: 'Save Production File', exact: true }).waitFor();
     await browserPage.locator('#pdf-output-mode').selectOption('compatibility');
-    await browserPage.getByRole('button', { name: 'Stamper Settings', exact: true }).click();
+
     if (!await browserPage.getByRole('checkbox', { name: 'Add mirror bleed', exact: true }).count())
       await browserPage.getByRole('button', { name: 'Bleed & Trim', exact: false }).click();
     await browserPage.getByRole('checkbox', { name: 'Add mirror bleed', exact: true }).check();
@@ -163,7 +163,7 @@ const out = path.resolve(process.env.PREFLIGHT_AUDIT_OUTPUT || 'output/audit');
     const download = await downloadPromise;
     assert.ok(download.suggestedFilename().endsWith('_Compatibility_600dpi.pdf'));
     await download.saveAs(out + '/ui-compatibility.pdf');
-    await browserPage.getByRole('button', { name: 'Preflight', exact: true }).click();
+
     await browserPage.getByRole('button', { name: 'Check production output', exact: true }).click();
     await browserPage.getByText(/Checked production output/).waitFor();
     const reportPromise = browserPage.waitForEvent('download');
