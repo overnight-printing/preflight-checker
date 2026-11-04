@@ -9,10 +9,11 @@
     "lint": "eslint .",
     "test": "node --test",
     "preview": "vite preview",
-    "test:browser": "node scripts/verify-browser.cjs && node scripts/verify-compatibility.cjs && node scripts/verify-crop-marks.cjs && node scripts/verify-decimal-inputs.cjs && node scripts/verify-module-recovery.cjs",
+    "test:browser": "node scripts/verify-browser.cjs && node scripts/verify-icc-conversion.cjs && node scripts/verify-compatibility.cjs && node scripts/verify-crop-marks.cjs && node scripts/verify-decimal-inputs.cjs && node scripts/verify-module-recovery.cjs",
     "verify:pdf": "python3 scripts/verify-pdf.py"
   },
   "dependencies": {
+    "lcms-wasm": "1.0.5",
     "lucide-react": "^1.16.0",
     "opentype.js": "^2.0.0",
     "pdf-lib": "^1.17.1",

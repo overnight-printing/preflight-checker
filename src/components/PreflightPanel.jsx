@@ -24,15 +24,17 @@ export default function PreflightPanel({
   onReset,
   excludedNames,
   onExcludedNamesChange,
+  cmykProfileName,
+  onCmykProfileSelect,
   artworkType,
   compatibilityDpi,
   onCompatibilityDpiChange,
   bleedAmount = 0
 }) {
   const [requirementsOpen, setRequirementsOpen] = useState(false);
-  const toggleSelection = (key, name) => {
+  const toggleSelection = (key, name, names) => {
     onExcludedNamesChange(prev => {
-      const next = new Set(prev[key]);
+      const next = new Set(prev[key] ?? (key === 'spotColors' ? names : []));
       if (next.has(name)) next.delete(name); else next.add(name);
       return { ...prev, [key]: next };
     });
@@ -282,7 +284,7 @@ export default function PreflightPanel({
             const isFixable = results.scope !== 'production' && check.fixable && isFailed && !pendingBleed;
             const selectable = key === 'spotColors' || key === 'fontEmbedding';
             const names = selectable ? (check.value || []).filter(name => key !== 'spotColors' || !['All', 'None'].includes(name)) : [];
-            const selected = names.filter(name => !excludedNames[key]?.has(name));
+            const selected = names.filter(name => !(excludedNames[key]?.has(name) ?? key === 'spotColors') && !check.spots?.[name]?.reason);
 
             return (
               <div 
@@ -323,11 +325,23 @@ export default function PreflightPanel({
 
                 {isFixable && selectable && (
                   <div role="group" aria-label={key === 'spotColors' ? 'Spot colors to convert' : 'Fonts to outline'} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <p className="field-help">{key === 'spotColors' ? 'Uncheck plates to preserve, including foil, varnish, and other finishes.' : 'Uncheck fonts to keep as editable text.'}</p>
+                    <p className="field-help">{key === 'spotColors' ? 'Select only inks to convert. Leave foil, varnish, and other finishing plates unchecked.' : 'Uncheck fonts to keep as editable text.'}</p>
+                    {key === 'spotColors' && (
+                      <div className="select-field">
+                        <p className="field-help">CMYK target: <strong>{cmykProfileName || check.outputProfile || 'SWOP 2006 Coated3 (standard default)'}</strong>. {cmykProfileName || check.outputProfile ? 'Confirm it matches the job.' : 'Standard fallback; use your press/paper profile when available.'}</p>
+                        <label>Use a different CMYK ICC profile
+                          <input type="file" style={{ display: 'block', width: '100%', minWidth: 0, marginTop: '6px', fontSize: '12px' }} accept=".icc,.icm" aria-label="CMYK ICC profile" onChange={event => {
+                            onCmykProfileSelect(event.target.files?.[0]);
+                            event.target.value = '';
+                          }} />
+                        </label>
+                        {cmykProfileName && <button className="btn btn-secondary" onClick={() => onCmykProfileSelect(null)}>Use PDF or standard profile</button>}
+                      </div>
+                    )}
                     {names.map(name => (
                       <label key={name} style={{ display: 'flex', alignItems: 'center', gap: '8px', minHeight: '28px', fontSize: '12px', color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>
-                        <input type="checkbox" checked={selected.includes(name)} onChange={() => toggleSelection(key, name)} />
-                        {name}
+                        <input type="checkbox" checked={selected.includes(name)} disabled={Boolean(check.spots?.[name]?.reason)} onChange={() => toggleSelection(key, name, names)} />
+                        <span>{check.spots?.[name]?.label || name}{check.spots?.[name]?.reason ? ` — ${check.spots[name].reason}` : ''}</span>
                       </label>
                     ))}
                   </div>

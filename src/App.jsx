@@ -189,6 +189,7 @@ export default function App() {
   // Preflight states
   const [preflightResults, setPreflightResults] = useState(null);
   const [excludedRepairNames, setExcludedRepairNames] = useState({});
+  const [spotCmykProfile, setSpotCmykProfile] = useState(null);
   const [printRequirements, setPrintRequirements] = useState(DEFAULT_PRINT_REQUIREMENTS);
   const [pdfOutputMode, setPdfOutputMode] = useState('preserve');
   const [compatibilityDpi, setCompatibilityDpi] = useState(600);
@@ -431,6 +432,7 @@ export default function App() {
     setArtworkFile(file);
     setOriginalFile(file); // Store initial upload as backup
     setExcludedRepairNames({});
+    setSpotCmykProfile(null);
     setArtworkCanvas(null);
     setPdfDoc(null);
     setOriginalImage(null);
@@ -885,6 +887,30 @@ export default function App() {
     }
   }, [artworkFile, pdfDoc, artworkType, printRequirements, artworkRepair]);
 
+  const handleCmykProfileSelect = async file => {
+    if (!file) { setSpotCmykProfile(null); return; }
+    const requestId = artworkLoadRequestIdRef.current;
+    setIsLoading(true);
+    try {
+      const [{ getIccProfileInfo, MAX_ICC_BYTES }, { loadIccColorEngine }, { createIccColorConverter }] = await Promise.all([
+        import('./utils/iccProfiles.js'), import('./utils/loadIccColorEngine.js'), import('./utils/iccColorConverter.js')
+      ]);
+      if (file.size > MAX_ICC_BYTES) throw new Error('Choose an ICC profile no larger than 16 MB.');
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (getIccProfileInfo(bytes).colorSpace !== 'CMYK') throw new Error('Choose a CMYK press/paper ICC profile, not an RGB or monitor profile.');
+      const converter = createIccColorConverter(await loadIccColorEngine(), bytes);
+      converter.close();
+      if (requestId === artworkLoadRequestIdRef.current) {
+        setSpotCmykProfile({ bytes, name: file.name });
+        setNotice({ type: 'success', message: `CMYK conversion target: ${file.name}. Select the inks to convert.` });
+      }
+    } catch (error) {
+      if (requestId === artworkLoadRequestIdRef.current) setNotice({ type: 'error', message: error.message });
+    } finally {
+      if (requestId === artworkLoadRequestIdRef.current) setIsLoading(false);
+    }
+  };
+
   // Handler for Preflight Auto-Fixes
   const handlePreflightFix = async (checkKey, selectedNames) => {
     if (!artworkFile || isBusy || isScanning) return;
@@ -930,7 +956,11 @@ export default function App() {
           .map(([page, dpi]) => [Number(page) - pagesToRemove.filter(number => number < Number(page)).length, dpi])) };
       } else if (checkKey === 'spotColors') {
         if (!spotNames.length) return;
-        const result = await fixSpotColors(artworkFile, spotNames);
+        const result = await fixSpotColors(artworkFile, spotNames, spotCmykProfile);
+        if (!result.converted.length) {
+          setNotice({ type: 'warning', message: `No inks changed. ${result.unconverted.map(name => `${name}: ${result.reasons[name] || 'Unsupported conversion.'}`).join(' ')}` });
+          return;
+        }
         updatedBytes = result.bytes;
         spotConversionReport = result;
       } else if (checkKey === 'fontEmbedding') {
@@ -970,7 +1000,7 @@ export default function App() {
         setNotice({ type: spotConversionReport?.unconverted.length || fontOutlineReport?.unconverted.length ? 'warning' : 'success', message: checkKey === 'flattenArtwork'
           ? `Flattening repair applied at ${compatibilityDpi} DPI in RGB. Repaired page: ${currentPage}. Review the updated preview, then Save Production File. Reset Artwork restores the original.`
           : checkKey === 'spotColors'
-          ? `${spotConversionReport.converted.length ? `Converted to CMYK: ${spotConversionReport.converted.join(', ')}.` : 'No spots were converted.'}${spotConversionReport.unconverted.length ? ` Left unchanged (requires a DeviceCMYK alternate and supported tint-transform, with all shared DeviceN inks selected): ${spotConversionReport.unconverted.join(', ')}. Use a color-managed PDF editor for other alternate spaces.` : ''} Review the updated checks, then Save Production File. Reset Artwork restores the original.`
+          ? `Converted to CMYK${spotConversionReport.profileName ? ` using ${spotConversionReport.profileName}` : ''}: ${spotConversionReport.converted.join(', ')}.${spotConversionReport.unconverted.length ? ` Kept unchanged: ${spotConversionReport.unconverted.map(name => `${name} (${spotConversionReport.reasons[name] || 'unsupported conversion'})`).join(', ')}.` : ''} Review the result, then Save Production File. Reset Artwork restores the original.`
           : checkKey === 'fontEmbedding'
           ? `${fontOutlineReport.converted.length ? `Outlined to vector paths: ${fontOutlineReport.converted.join(', ')}.` : 'No fonts were outlined.'}${fontOutlineReport.unconverted.length ? ` Left unchanged (unsupported font/encoding/render mode, unresolved characters, or mixed font selections within a text object): ${fontOutlineReport.unconverted.join(', ')}.` : ''} Review the updated checks, then Save Production File. Reset Artwork restores the original.`
           : 'Repair applied. Review the updated checks, then Save Production File. Reset Artwork restores the original.' });
@@ -1472,6 +1502,8 @@ export default function App() {
 
                 <fieldset className="tool-controls" disabled={controlsBusy}>
                   <PreflightPanel
+                    cmykProfileName={spotCmykProfile?.name}
+                    onCmykProfileSelect={handleCmykProfileSelect}
                     excludedNames={excludedRepairNames}
                     onExcludedNamesChange={setExcludedRepairNames}
                     currentPage={currentPage}
