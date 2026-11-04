@@ -155,6 +155,19 @@ export function convertSpotColorsToCmyk(pdfDoc, spotNames, { colorConverter = nu
   const records = [];
   const draftByOwner = new Map();
   const reject = (names, reason) => names.forEach(name => { unconverted.add(name); reasons.set(name, reason); });
+  const hasComplexType3Glyphs = dictionary => {
+    if (dictionary.get(PDFName.of('Subtype')) !== PDFName.of('Type3')) return false;
+    const resources = lookup(dictionary.get(PDFName.of('Resources')));
+    if (resources instanceof PDFDict && resources.keys().length) return true;
+    const glyphs = lookup(dictionary.get(PDFName.of('CharProcs')));
+    if (!(glyphs instanceof PDFDict)) return true;
+    try {
+      return glyphs.values().some(value => {
+        const stream = lookup(value);
+        return !(stream instanceof PDFRawStream) || [...contentOperators(decodeStreamText(stream))].some(({ operator }) => ['cs', 'CS', 'sc', 'SC', 'scn', 'SCN', 'Do', 'BI', 'sh', 'gs'].includes(operator));
+      });
+    } catch { return true; }
+  };
   const inspected = new Set();
   const inspect = value => {
     const object = lookup(value);
@@ -163,8 +176,8 @@ export function convertSpotColorsToCmyk(pdfDoc, spotNames, { colorConverter = nu
     const dictionary = object instanceof PDFRawStream ? object.dict : object;
     if (dictionary instanceof PDFDict) {
       const mask = lookup(dictionary.get(PDFName.of('SMask')));
-      if (dictionary.get(PDFName.of('Subtype')) === PDFName.of('Type3') || dictionary.has(PDFName.of('AP')) || (mask instanceof PDFDict && mask.has(PDFName.of('G')))) {
-        reject(spotNames, 'Type3 fonts, annotation appearances, or soft-mask groups require source-file spot conversion.');
+      if (hasComplexType3Glyphs(dictionary) || dictionary.has(PDFName.of('AP')) || (mask instanceof PDFDict && mask.has(PDFName.of('G')))) {
+        reject(spotNames, 'Complex Type3 glyphs, annotation appearances, or soft-mask groups require source-file spot conversion.');
       }
       dictionary.values().forEach(inspect);
     } else if (object instanceof PDFArray) object.asArray().forEach(inspect);
