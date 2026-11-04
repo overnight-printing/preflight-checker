@@ -6,6 +6,7 @@ import { scanContent, multiplyLinearMatrices } from './pdfContent.js';
 import { normalizePrintRequirements, getPrintDocumentChecks, getOrderTrim } from './printRequirements.js';
 import { convertSpotColorsToCmyk } from './pdfSpotConversion.js';
 import { removeOrphanedObjects } from './pdfGarbageCollect.js';
+import { getEmbeddedCmykProfile, getIccProfileInfo, getSpotAlternateInfo } from './iccProfiles.js';
 
 /**
  * Runs print checks against the selected job requirements.
@@ -83,6 +84,7 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
   let stencilImages = 0;
   let explicitImageMasks = 0;
   const spotColorsFound = new Set();
+  const spotColorDetails = {};
   const blankPagesList = [];
 
   // 1. PDF Version check (Warning only)
@@ -191,7 +193,16 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
               const names = lookup(csVal.get(1));
               for (const name of names instanceof PDFArray ? names.asArray() : [names]) {
                 const spotName = name?.toString().replace(/^\//, '');
-                if (spotName && !['Cyan', 'Magenta', 'Yellow', 'Black'].includes(spotName)) spotColorsFound.add(spotName);
+                if (spotName && !['Cyan', 'Magenta', 'Yellow', 'Black'].includes(spotName)) {
+                  spotColorsFound.add(spotName);
+                  const capability = getSpotAlternateInfo(lookup(csVal.get(2)), lookup);
+                  const previous = spotColorDetails[spotName];
+                  spotColorDetails[spotName] = {
+                    label: name?.decodeText?.() || spotName,
+                    needsProfile: Boolean(previous?.needsProfile || capability.needsProfile),
+                    reason: previous?.reason || capability.reason
+                  };
+                }
               }
             }
           }
@@ -449,8 +460,10 @@ export async function runPreflightChecks(file, pdfjsDoc, printRequirements = {})
     const convertibleSpots = Array.from(spotColorsFound).filter(name => !['All', 'None'].includes(name));
     results.checks.spotColors = {
       status: registrationPages.size ? 'error' : spotColorsFound.has('All') ? 'warning' : 'info',
-      details: `Spot inks: ${Array.from(spotColorsFound).join(', ')}. Confirm these plates are intended; convert unwanted spots using the printer's color-managed workflow.${spotColorsFound.has('All') ? ` Registration color (/All) prints on every plate.${registrationPages.size ? ` Painted registration artwork on pages ${[...registrationPages].join(', ')} is not identified as printer marks; correct artwork or verify marks in a production PDF editor.` : ' Confirm registration is limited to printer marks.'}` : ''}${spotColorsFound.has('None') ? ' /None prints nothing; confirm invisible artwork is intentional.' : ''}${convertibleSpots.length ? ' "Convert to CMYK" uses selected spots\' declared DeviceCMYK tint transforms. Lab, RGB, Gray, and ICC-based alternates need a color-managed workflow and are left unchanged; shared DeviceN inks must all be selected.' : ''}`,
+      details: `Spot inks: ${Array.from(spotColorsFound, name => spotColorDetails[name]?.label || name).join(', ')}. Confirm these plates are intended.${spotColorsFound.has('All') ? ` Registration color (/All) prints on every plate.${registrationPages.size ? ` Painted registration artwork on pages ${[...registrationPages].join(', ')} is not identified as printer marks; correct artwork or verify marks in a production PDF editor.` : ' Confirm registration is limited to printer marks.'}` : ''}${spotColorsFound.has('None') ? ' /None prints nothing; confirm invisible artwork is intentional.' : ''}${convertibleSpots.length ? ' Select inks to convert. Existing CMYK recipes are retained; Lab and ICC-based spots use the chosen CMYK press/paper profile. Shared DeviceN inks must all be selected.' : ''}`,
       value: Array.from(spotColorsFound),
+      spots: spotColorDetails,
+      outputProfile: getEmbeddedCmykProfile(pdfDoc)?.name || null,
       fixable: convertibleSpots.length > 0
     };
   }
@@ -522,7 +535,8 @@ function isRgbColorSpace(space, lookup) {
   const type = space.get(0)?.toString();
   if (type === '/ICCBased') {
     const profile = lookup(space.get(1));
-    return profile instanceof PDFRawStream && profile.dict.get(PDFName.of('N'))?.asNumber() === 3;
+    try { return profile instanceof PDFRawStream && getIccProfileInfo(decodePDFRawStream(profile).decode()).colorSpace === 'RGB'; }
+    catch { return profile instanceof PDFRawStream && ['/DeviceRGB', '/CalRGB'].includes(lookup(profile.dict.get(PDFName.of('Alternate')))?.toString()); }
   }
   if (type === '/Indexed') return isRgbColorSpace(lookup(space.get(1)), lookup);
   return type === '/DeviceRGB' || type === '/CalRGB';
@@ -557,15 +571,40 @@ export async function fixOrderBoxes(file, requirements) {
 
 // Converts every spot in `spotNames` (expected: the convertible subset of a
 // spotColors check's own value, i.e. excluding registration /All and /None)
-// to its declared DeviceCMYK tint-transform equivalent. Reports which
+// to its declared CMYK recipe or ICC-managed CMYK equivalent. Reports which
 // spots actually converted versus which were left untouched (an unsupported
 // alternate space, or a malformed tint-transform) so the caller can tell the
 // operator honestly rather than imply every spot was handled.
-export async function fixSpotColors(file, spotNames) {
+export async function fixSpotColors(file, spotNames, outputProfile = null) {
   const pdfDoc = await getPdfDocument(file, true);
-  const { converted, unconverted } = convertSpotColorsToCmyk(pdfDoc, new Set(spotNames.map(name => `/${name}`)));
-  await removeOrphanedObjects(pdfDoc);
-  return { bytes: await pdfDoc.save(), converted: [...converted], unconverted: [...unconverted] };
+  const selected = new Set(spotNames.map(name => `/${name}`));
+  const lookup = value => pdfDoc.context.lookup(value);
+  const needsProfile = collectPdfDictionaries(pdfDoc).some(dictionary => {
+    const entry = lookup(dictionary.get(PDFName.of('ColorSpace')));
+    return (entry instanceof PDFDict ? entry.values().map(lookup) : [entry]).some(space => {
+      if (!(space instanceof PDFArray) || !['/Separation', '/DeviceN'].includes(space.get(0)?.toString()) || lookup(space.get(2)) === PDFName.of('DeviceCMYK')) return false;
+      const names = lookup(space.get(1));
+      return (names instanceof PDFArray ? names.asArray() : [names]).some(name => selected.has(name?.toString()));
+    });
+  });
+  let destination = outputProfile || getEmbeddedCmykProfile(pdfDoc);
+  let converter;
+  try {
+    if (needsProfile) {
+      const [{ loadIccColorEngine }, { createIccColorConverter }] = await Promise.all([import('./loadIccColorEngine.js'), import('./iccColorConverter.js')]);
+      if (!destination) destination = await (await import('./defaultCmykProfile.js')).loadDefaultCmykProfile();
+      converter = createIccColorConverter(await loadIccColorEngine(), destination.bytes);
+    }
+    const result = convertSpotColorsToCmyk(pdfDoc, selected, { colorConverter: converter, outputProfileBytes: destination?.bytes });
+    const label = name => PDFName.of(name.replace(/^\//, '')).decodeText();
+    if (result.converted.size) await removeOrphanedObjects(pdfDoc);
+    return {
+      bytes: result.converted.size ? await pdfDoc.save() : null,
+      converted: [...result.converted].map(label), unconverted: [...result.unconverted].map(label),
+      reasons: Object.fromEntries([...result.reasons].map(([name, reason]) => [label(name), reason])),
+      profileName: result.profiled.size ? destination.name : null
+    };
+  } finally { converter?.close(); }
 }
 
 // Outlines every font in `fontNames` (expected: a fontEmbedding check's own

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { DOMMatrix } from '@napi-rs/canvas';
 import { PDFDocument, PDFName, PDFNumber, cmyk } from 'pdf-lib';
 
@@ -89,6 +90,35 @@ test('registration and None separations are reported, and painted registration a
   assert.equal(checks.spotColors.status, 'error');
   assert.match(checks.spotColors.details, /every plate/);
   assert.match(checks.spotColors.details, /prints nothing/);
+});
+
+test('spot repair metadata names Lab ICC inks clearly and reports the embedded CMYK target', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([100, 100]);
+  const lab = doc.context.register(doc.context.flateStream(await readFile(new URL('./fixtures/lab-d50.icc', import.meta.url)), { N: 3, Alternate: ['Lab', { WhitePoint: [0.9642, 1, 0.8249] }] }));
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ ColorSpace: {
+    Ink: ['Separation', 'PANTONE 877 U', ['ICCBased', lab], {}],
+    Foil: ['Separation', 'SILVER FOIL', 'DeviceCMYK', {}]
+  } }));
+  let checks = await check(doc);
+  assert.equal(checks.colorMode.status, 'pass', 'three Lab channels are not RGB');
+  assert.deepEqual(checks.spotColors.spots['PANTONE#20877#20U'], { label: 'PANTONE 877 U', needsProfile: true, reason: null });
+  assert.equal(checks.spotColors.spots['SILVER#20FOIL'].needsProfile, false);
+  assert.equal(checks.spotColors.outputProfile, null);
+  const profile = doc.context.register(doc.context.flateStream(await readFile(new URL('../public/profiles/SWOP2006_Coated3v2.icc', import.meta.url)), { N: 4 }));
+  doc.catalog.set(PDFName.of('OutputIntents'), doc.context.obj([{ DestOutputProfile: profile }]));
+  checks = await check(doc);
+  assert.equal(checks.spotColors.outputProfile, 'Embedded CMYK profile');
+});
+
+test('unsupported alternate spaces have a reason before an operator tries conversion', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([100, 100]);
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ ColorSpace: {
+    Ink: ['Separation', 'Unsupported ink', 'DeviceRGB', {}]
+  } }));
+  const checks = await check(doc);
+  assert.match(checks.spotColors.spots['Unsupported#20ink'].reason, /no supported CMYK conversion/);
 });
 
 test('completed scans and order checks have stable entries even when no issue fires', async () => {
