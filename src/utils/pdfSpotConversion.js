@@ -133,7 +133,11 @@ function stripDanglingColorSpaceSelectors(text, resources, lookup, removable) {
 }
 
 function decodeStreamText(stream) {
-  return new TextDecoder('latin1').decode(decodePDFRawStream(stream).decode());
+  const bytes = decodePDFRawStream(stream).decode();
+  let text = '';
+  // TextDecoder's latin1 alias maps 0x80–0x9f to Unicode, corrupting PDF strings on save.
+  for (let offset = 0; offset < bytes.length; offset += 32768) text += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+  return text;
 }
 
 function encodeStreamText(stream, context, text) {

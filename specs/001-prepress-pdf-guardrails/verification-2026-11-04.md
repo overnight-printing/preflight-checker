@@ -13,9 +13,9 @@ Branch: `overnight-printing/profiled-spot-conversion`.
 
 ## Automated evidence
 
-- `npm test`: 143 passed. Native LittleCMS 2.17 reference values independently check Lab/RGB/CMYK transforms, negative Lab components, and CMYK percentage scaling. Regression coverage includes transactional refusal, stream-array state, inherited Forms, rendering intents, foil retention, unsupported content, profile validation, and readable preflight metadata.
+- `npm test`: 144 tests, including a byte-preservation regression for non-ASCII literal font strings. Native LittleCMS 2.17 reference values independently check Lab/RGB/CMYK transforms, negative Lab components, and CMYK percentage scaling. Regression coverage includes transactional refusal, stream-array state, inherited Forms, rendering intents, foil retention, unsupported content, profile validation, and readable preflight metadata.
 - `npm run lint`: passed.
-- `GITHUB_ACTIONS=true npm run build`: passed, including the production subpath. The deferred LittleCMS assets are approximately 35 KB JavaScript and 316 KB WASM; the unchanged fallback profile is approximately 2.68 MB.
+- `GITHUB_ACTIONS=true npm run build`: passed, including the production subpath. The deferred LittleCMS assets are approximately 35 KB JavaScript and 316 KB WASM; the unchanged fallback profile is approximately 2.75 MB.
 - Focused browser verification passed for custom and standard profiles, opt-in selection, invalid profile rejection, upload reset, tagged CMYK export, preserved foil, loaded WASM/profile assets, and no-op preview preservation. The same script runs against the production subpath in CI.
 - The full six-suite browser run and Poppler regression suite are required by CI; see the pull request checks for the final result.
 

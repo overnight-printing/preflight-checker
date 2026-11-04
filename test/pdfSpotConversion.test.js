@@ -307,3 +307,18 @@ test('unsupported appearance, Type3, and soft-mask content cannot leave partiall
     assert.ok(resources.lookup(PDFName.of('ColorSpace')).has(PDFName.of('Spot1')), kind);
   }
 });
+
+test('spot conversion preserves literal font character bytes outside ASCII', async () => {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([100, 100]);
+  page.node.set(PDFName.of('Resources'), doc.context.obj({ ColorSpace: {
+    Spot1: ['Separation', 'Spot1', 'DeviceCMYK', { FunctionType: 2, Domain: [0, 1], C0: [0, 0, 0, 0], C1: [0, 0, 0, 1], N: 1 }]
+  } }));
+  const prefix = 'BT /Font 12 Tf (\x80\x81\x8D\x9C\xFF) Tj ET ';
+  const source = prefix + '/Spot1 cs 1 scn 0 0 10 10 re f';
+  const content = doc.context.register(doc.context.flateStream(Uint8Array.from(source, character => character.charCodeAt(0))));
+  page.node.set(PDFName.of('Contents'), content);
+  assert.equal(convertSpotColorsToCmyk(doc, new Set(['/Spot1'])).converted.size, 1);
+  const result = decodePDFRawStream(doc.context.lookup(content)).decode();
+  assert.deepEqual(result.subarray(0, prefix.length), Uint8Array.from(prefix, character => character.charCodeAt(0)));
+});
